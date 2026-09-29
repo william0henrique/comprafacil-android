@@ -11,6 +11,7 @@ import {
   type StorePrice,
 } from "./domain";
 import { parseCloudBackupSnapshot, type CloudBackupSnapshot } from "./cloud-backup-snapshot";
+import { normalizeGtin, isSameBarcodeProduct } from "./barcode/product-matcher";
 
 export type ShoppingList = {
   id: string;
@@ -28,9 +29,22 @@ export type Product = {
   id: string;
   name: string;
   brand: string | null;
+  description: string | null;
   sizeValue: number | null;
   sizeUnit: MeasurementUnit | null;
   category: string | null;
+  barcode: string | null;
+  imageUrl: string | null;
+  imageSource: string | null;
+  imageRightsVerified: boolean;
+  metadataSource: string | null;
+  lastLookupAt: string | null;
+  cacheExpiresAt: string | null;
+  referencePriceCents: number | null;
+  lowestPriceCents: number | null;
+  highestPriceCents: number | null;
+  priceSourceCount: number;
+  priceSearchedAt: string | null;
   isFavorite: boolean;
   createdAt: string;
 };
@@ -100,11 +114,11 @@ export type PriceSaveResult = { changed: boolean; oldPriceCents: number | null; 
 
 type ShoppingListDbRow = Omit<ShoppingList, "isFavorite" | "totalCents"> & { isFavorite: number; rawTotal: number | null };
 type StoreDbRow = Omit<Store, "addressVerified" | "isFavorite" | "isActive"> & { addressVerified: number; isFavorite: number; isActive: number };
-type ProductDbRow = Omit<Product, "isFavorite"> & { isFavorite: number };
+type ProductDbRow = Omit<Product, "isFavorite" | "imageRightsVerified"> & { isFavorite: number; imageRightsVerified: number };
 type PriceEventDbRow = Omit<PriceEvent, "isRead"> & { isRead: number };
 type AlertPreferenceDbRow = Omit<AlertPreference, "enabled"> & { enabled: number };
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const SUPERLUNA_SOURCE = "https://superluna.com.br/lojas/";
 const SUPERLUNA_BRANCHES = [
   { id: "superluna-eldorado", branch: "Eldorado", city: "Contagem" },
@@ -156,9 +170,22 @@ export async function initializeLocalDatabase(db: SQLiteDatabase): Promise<void>
           id TEXT PRIMARY KEY NOT NULL,
           name TEXT NOT NULL,
           brand TEXT,
+          description TEXT,
           size_value REAL,
           size_unit TEXT,
           category TEXT,
+          barcode TEXT,
+          image_url TEXT,
+          image_source TEXT,
+          image_rights_verified INTEGER NOT NULL DEFAULT 0,
+          metadata_source TEXT,
+          last_lookup_at TEXT,
+          cache_expires_at TEXT,
+          reference_price_cents INTEGER,
+          lowest_price_cents INTEGER,
+          highest_price_cents INTEGER,
+          price_source_count INTEGER NOT NULL DEFAULT 0,
+          price_searched_at TEXT,
           product_key TEXT NOT NULL UNIQUE,
           is_favorite INTEGER NOT NULL DEFAULT 0,
           created_at TEXT NOT NULL
@@ -218,6 +245,20 @@ export async function initializeLocalDatabase(db: SQLiteDatabase): Promise<void>
         CREATE INDEX IF NOT EXISTS idx_alert_events_date ON alert_events(created_at DESC);
         PRAGMA user_version = 1;
       `);
+
+      const productColumns = await db.getAllAsync<{ name: string }>("PRAGMA table_info(products);");
+      const existingProductColumns = new Set(productColumns.map((column) => column.name));
+      const productMigrations: Array<[string, string]> = [
+        ["description", "TEXT"], ["barcode", "TEXT"], ["image_url", "TEXT"], ["image_source", "TEXT"],
+        ["image_rights_verified", "INTEGER NOT NULL DEFAULT 0"], ["metadata_source", "TEXT"], ["last_lookup_at", "TEXT"],
+        ["cache_expires_at", "TEXT"], ["reference_price_cents", "INTEGER"], ["lowest_price_cents", "INTEGER"],
+        ["highest_price_cents", "INTEGER"], ["price_source_count", "INTEGER NOT NULL DEFAULT 0"], ["price_searched_at", "TEXT"],
+      ];
+      for (const [column, definition] of productMigrations) {
+        if (!existingProductColumns.has(column)) await db.execAsync(`ALTER TABLE products ADD COLUMN ${column} ${definition};`);
+      }
+      await db.execAsync("CREATE UNIQUE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode) WHERE barcode IS NOT NULL;");
+      await db.execAsync("PRAGMA user_version = 2;");
     });
   }
 
@@ -251,14 +292,20 @@ export async function getLists(db: SQLiteDatabase): Promise<ShoppingList[]> {
     SELECT l.id, l.name, l.is_favorite AS isFavorite, l.selected_store_id AS selectedStoreId,
       l.created_at AS createdAt, l.updated_at AS updatedAt,
       COUNT(li.id) AS itemCount,
-      SUM(CASE WHEN po.price_cents IS NOT NULL THEN ROUND(po.price_cents * li.quantity) ELSE 0 END) AS rawTotal,
-      SUM(CASE WHEN li.id IS NOT NULL AND po.price_cents IS NULL THEN 1 ELSE 0 END) AS missingCount
+      SUM(CASE WHEN COALESCE(po.price_cents, p.reference_price_cents, manual_avg.average_price_cents) IS NOT NULL
+        THEN ROUND(COALESCE(po.price_cents, p.reference_price_cents, manual_avg.average_price_cents) * li.quantity) ELSE 0 END) AS rawTotal,
+      SUM(CASE WHEN li.id IS NOT NULL AND COALESCE(po.price_cents, p.reference_price_cents, manual_avg.average_price_cents) IS NULL THEN 1 ELSE 0 END) AS missingCount
     FROM shopping_lists l
     LEFT JOIN list_items li ON li.list_id = l.id
+    LEFT JOIN products p ON p.id = li.product_id
     LEFT JOIN price_observations po ON po.product_id = li.product_id AND po.store_id = l.selected_store_id AND po.source = ?
+    LEFT JOIN (
+      SELECT product_id, CAST(ROUND(AVG(price_cents)) AS INTEGER) AS average_price_cents
+      FROM price_observations WHERE source = ? GROUP BY product_id
+    ) manual_avg ON manual_avg.product_id = li.product_id
     GROUP BY l.id
     ORDER BY l.updated_at DESC;
-  `, MANUAL_STORE_PRICE_SOURCE);
+  `, MANUAL_STORE_PRICE_SOURCE, MANUAL_STORE_PRICE_SOURCE);
   return rows.map(({ rawTotal, ...row }) => ({
     ...row,
     isFavorite: Boolean(row.isFavorite),
@@ -317,56 +364,145 @@ export async function getListItems(db: SQLiteDatabase, listId: string): Promise<
     SELECT li.id, li.list_id AS listId, li.product_id AS productId, li.quantity, li.created_at AS createdAt,
       p.name AS productName, p.brand, p.size_value AS sizeValue, p.size_unit AS sizeUnit, p.category,
       p.is_favorite AS isFavorite,
-      po.price_cents AS priceCents, po.source, po.source_label AS sourceLabel, po.observed_at AS observedAt
+      COALESCE(po.price_cents, p.reference_price_cents, manual_avg.average_price_cents) AS priceCents,
+      CASE WHEN po.price_cents IS NOT NULL THEN po.source
+        WHEN p.reference_price_cents IS NOT NULL OR manual_avg.average_price_cents IS NOT NULL THEN 'derived_reference'
+        ELSE NULL END AS source,
+      CASE WHEN po.price_cents IS NOT NULL THEN po.source_label
+        WHEN p.reference_price_cents IS NOT NULL THEN 'Preço de referência calculado; não é cotação de supermercado'
+        WHEN manual_avg.average_price_cents IS NOT NULL THEN 'Média de preços informados manualmente; não é cotação de supermercado'
+        ELSE NULL END AS sourceLabel,
+      CASE WHEN po.price_cents IS NOT NULL THEN po.observed_at
+        WHEN p.reference_price_cents IS NOT NULL THEN p.price_searched_at
+        ELSE manual_avg.latest_observed_at END AS observedAt
     FROM list_items li
     JOIN products p ON p.id = li.product_id
     JOIN shopping_lists l ON l.id = li.list_id
     LEFT JOIN price_observations po ON po.product_id = p.id AND po.store_id = l.selected_store_id AND po.source = ?
+    LEFT JOIN (
+      SELECT product_id, CAST(ROUND(AVG(price_cents)) AS INTEGER) AS average_price_cents, MAX(observed_at) AS latest_observed_at
+      FROM price_observations WHERE source = ? GROUP BY product_id
+    ) manual_avg ON manual_avg.product_id = p.id
     WHERE li.list_id = ?
     ORDER BY li.created_at ASC;
-  `, MANUAL_STORE_PRICE_SOURCE, listId).then((rows) => rows.map((row) => ({ ...row, isFavorite: Boolean(row.isFavorite) })));
+  `, MANUAL_STORE_PRICE_SOURCE, MANUAL_STORE_PRICE_SOURCE, listId).then((rows) => rows.map((row) => ({ ...row, isFavorite: Boolean(row.isFavorite) })));
 }
 
 export async function addProductToList(
   db: SQLiteDatabase,
   listId: string,
-  draft: { name: string; brand?: string; sizeValue?: number | null; sizeUnit?: MeasurementUnit | null; category?: string; quantity: number },
+  draft: {
+    name: string;
+    brand?: string;
+    description?: string | null;
+    sizeValue?: number | null;
+    sizeUnit?: MeasurementUnit | null;
+    category?: string;
+    barcode?: string | null;
+    imageUrl?: string | null;
+    imageSource?: string | null;
+    imageRightsVerified?: boolean;
+    metadataSource?: string | null;
+    lastLookupAt?: string | null;
+    cacheExpiresAt?: string | null;
+    quantity: number;
+  },
 ): Promise<{ productId: string; listItemId: string }> {
+  if (!draft.name.trim()) throw new RangeError("Informe o nome do produto.");
+  if (!Number.isFinite(draft.quantity) || draft.quantity <= 0) throw new RangeError("A quantidade precisa ser maior que zero.");
   const id = makeLocalId("product");
+  const barcode = draft.barcode ? normalizeGtin(draft.barcode) : null;
+  if (draft.barcode && !barcode) throw new RangeError("O código de barras/EAN não é válido.");
   const identity = makeProductIdentity({ name: draft.name, brand: draft.brand, sizeValue: draft.sizeValue, sizeUnit: draft.sizeUnit });
-  const productKey = makeProductKey({ name: draft.name, brand: draft.brand, sizeValue: draft.sizeValue, sizeUnit: draft.sizeUnit }, id);
+  const identityKey = identity ? makeProductKey({ name: draft.name, brand: draft.brand, sizeValue: draft.sizeValue, sizeUnit: draft.sizeUnit }, id) : null;
+  const productKey = barcode ? `barcode:${barcode}` : makeProductKey({ name: draft.name, brand: draft.brand, sizeValue: draft.sizeValue, sizeUnit: draft.sizeUnit }, id);
   const now = new Date().toISOString();
-  let product = identity
-    ? await db.getFirstAsync<{ id: string }>("SELECT id FROM products WHERE product_key = ?;", productKey)
-    : null;
+  const descriptor = {
+    barcode,
+    name: draft.name.trim(),
+    brand: draft.brand?.trim() || null,
+    sizeValue: draft.sizeValue ?? null,
+    sizeUnit: draft.sizeUnit ?? null,
+  };
+  let product: Pick<Product, "id" | "name" | "brand" | "sizeValue" | "sizeUnit"> | null = barcode ? await getProductByBarcode(db, barcode) : null;
+
+  if (product && !isSameBarcodeProduct(descriptor, {
+    barcode,
+    name: product.name,
+    brand: product.brand,
+    sizeValue: product.sizeValue,
+    sizeUnit: product.sizeUnit,
+  })) {
+    throw new Error("Este código de barras já está associado a um produto com nome, marca ou tamanho incompatível.");
+  }
+
+  if (!product && identityKey) {
+    const sameIdentity = await db.getFirstAsync<{ id: string; barcode: string | null; name: string; brand: string | null; sizeValue: number | null; sizeUnit: MeasurementUnit | null }>(
+      "SELECT id, barcode, name, brand, size_value AS sizeValue, size_unit AS sizeUnit FROM products WHERE product_key = ?;",
+      identityKey,
+    );
+    if (sameIdentity && (!barcode || sameIdentity.barcode === barcode || sameIdentity.barcode === null)) {
+      product = sameIdentity;
+      if (barcode && sameIdentity.barcode === null) {
+        await db.runAsync("UPDATE products SET barcode = ?, product_key = ? WHERE id = ?;", barcode, productKey, sameIdentity.id);
+      }
+    }
+  }
+
   if (!product) {
+    const imageUrl = draft.imageRightsVerified ? draft.imageUrl?.trim() || null : null;
+    const imageSource = draft.imageRightsVerified ? draft.imageSource?.trim() || null : null;
     await db.runAsync(
-      `INSERT INTO products (id, name, brand, size_value, size_unit, category, product_key, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+      `INSERT INTO products (id, name, brand, description, size_value, size_unit, category, barcode,
+        image_url, image_source, image_rights_verified, metadata_source, last_lookup_at, cache_expires_at,
+        product_key, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
       id,
-      draft.name.trim(),
-      draft.brand?.trim() || null,
+      descriptor.name,
+      descriptor.brand,
+      draft.description?.trim() || null,
       draft.sizeValue ?? null,
       draft.sizeUnit ?? null,
       draft.category?.trim() || null,
+      barcode,
+      imageUrl,
+      imageSource,
+      Number(Boolean(imageUrl && draft.imageRightsVerified)),
+      draft.metadataSource ?? (barcode ? "manual-local" : null),
+      draft.lastLookupAt ?? null,
+      draft.cacheExpiresAt ?? null,
       productKey,
       now,
     );
-    product = { id };
+    product = { id, name: descriptor.name, brand: descriptor.brand, sizeValue: descriptor.sizeValue, sizeUnit: descriptor.sizeUnit };
+  } else if (barcode) {
+    await db.runAsync(
+      `UPDATE products SET description = COALESCE(?, description), category = COALESCE(?, category),
+        metadata_source = COALESCE(?, metadata_source), last_lookup_at = COALESCE(?, last_lookup_at),
+        cache_expires_at = COALESCE(?, cache_expires_at)
+       WHERE id = ?;`,
+      draft.description?.trim() || null,
+      draft.category?.trim() || null,
+      draft.metadataSource ?? "manual-local",
+      draft.lastLookupAt ?? null,
+      draft.cacheExpiresAt ?? null,
+      product.id,
+    );
   }
+  const productId = product?.id ?? id;
   await db.runAsync(
     `INSERT INTO list_items (id, list_id, product_id, quantity, created_at)
      VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(list_id, product_id) DO UPDATE SET quantity = list_items.quantity + excluded.quantity;`,
     makeLocalId("item"),
     listId,
-    product.id,
+    productId,
     draft.quantity,
     now,
   );
   await db.runAsync("UPDATE shopping_lists SET updated_at = ? WHERE id = ?;", now, listId);
-  const listItem = await db.getFirstAsync<{ id: string }>("SELECT id FROM list_items WHERE list_id = ? AND product_id = ?;", listId, product.id);
-  return { productId: product.id, listItemId: listItem?.id ?? "" };
+  const listItem = await db.getFirstAsync<{ id: string }>("SELECT id FROM list_items WHERE list_id = ? AND product_id = ?;", listId, productId);
+  return { productId, listItemId: listItem?.id ?? "" };
 }
 
 export async function addExistingProductToList(
@@ -463,20 +599,65 @@ export async function toggleProductFavorite(db: SQLiteDatabase, productId: strin
 
 export async function getProducts(db: SQLiteDatabase, favoritesOnly = false): Promise<Product[]> {
   const rows = await db.getAllAsync<ProductDbRow>(`
-    SELECT id, name, brand, size_value AS sizeValue, size_unit AS sizeUnit, category,
-      is_favorite AS isFavorite, created_at AS createdAt
+    SELECT id, name, brand, description, size_value AS sizeValue, size_unit AS sizeUnit, category,
+      barcode, image_url AS imageUrl, image_source AS imageSource, image_rights_verified AS imageRightsVerified,
+      metadata_source AS metadataSource, last_lookup_at AS lastLookupAt, cache_expires_at AS cacheExpiresAt,
+      reference_price_cents AS referencePriceCents, lowest_price_cents AS lowestPriceCents,
+      highest_price_cents AS highestPriceCents, price_source_count AS priceSourceCount,
+      price_searched_at AS priceSearchedAt, is_favorite AS isFavorite, created_at AS createdAt
     FROM products ${favoritesOnly ? "WHERE is_favorite = 1" : ""}
     ORDER BY name COLLATE NOCASE;
   `);
-  return rows.map((row) => ({ ...row, isFavorite: Boolean(row.isFavorite) }));
+  return rows.map((row) => ({ ...row, isFavorite: Boolean(row.isFavorite), imageRightsVerified: Boolean(row.imageRightsVerified) }));
 }
 
 export async function getProduct(db: SQLiteDatabase, productId: string): Promise<Product | null> {
   const row = await db.getFirstAsync<ProductDbRow>(`
-    SELECT id, name, brand, size_value AS sizeValue, size_unit AS sizeUnit, category,
-      is_favorite AS isFavorite, created_at AS createdAt FROM products WHERE id = ?;
+    SELECT id, name, brand, description, size_value AS sizeValue, size_unit AS sizeUnit, category,
+      barcode, image_url AS imageUrl, image_source AS imageSource, image_rights_verified AS imageRightsVerified,
+      metadata_source AS metadataSource, last_lookup_at AS lastLookupAt, cache_expires_at AS cacheExpiresAt,
+      reference_price_cents AS referencePriceCents, lowest_price_cents AS lowestPriceCents,
+      highest_price_cents AS highestPriceCents, price_source_count AS priceSourceCount,
+      price_searched_at AS priceSearchedAt, is_favorite AS isFavorite, created_at AS createdAt
+    FROM products WHERE id = ?;
   `, productId);
-  return row ? { ...row, isFavorite: Boolean(row.isFavorite) } : null;
+  return row ? { ...row, isFavorite: Boolean(row.isFavorite), imageRightsVerified: Boolean(row.imageRightsVerified) } : null;
+}
+
+export async function getProductByBarcode(db: SQLiteDatabase, rawBarcode: string): Promise<Product | null> {
+  const barcode = normalizeGtin(rawBarcode);
+  if (!barcode) return null;
+  const row = await db.getFirstAsync<ProductDbRow>(`
+    SELECT id, name, brand, description, size_value AS sizeValue, size_unit AS sizeUnit, category,
+      barcode, image_url AS imageUrl, image_source AS imageSource, image_rights_verified AS imageRightsVerified,
+      metadata_source AS metadataSource, last_lookup_at AS lastLookupAt, cache_expires_at AS cacheExpiresAt,
+      reference_price_cents AS referencePriceCents, lowest_price_cents AS lowestPriceCents,
+      highest_price_cents AS highestPriceCents, price_source_count AS priceSourceCount,
+      price_searched_at AS priceSearchedAt, is_favorite AS isFavorite, created_at AS createdAt
+    FROM products WHERE barcode = ?;
+  `, barcode);
+  return row ? { ...row, isFavorite: Boolean(row.isFavorite), imageRightsVerified: Boolean(row.imageRightsVerified) } : null;
+}
+
+export async function updateProductLookupAt(db: SQLiteDatabase, productId: string, lookedUpAt: string): Promise<void> {
+  await db.runAsync("UPDATE products SET last_lookup_at = ? WHERE id = ?;", lookedUpAt, productId);
+}
+
+export async function updateProductPriceCache(
+  db: SQLiteDatabase,
+  productId: string,
+  summary: { referencePriceCents: number | null; lowestPriceCents: number | null; highestPriceCents: number | null; sourceCount: number; searchedAt: string },
+): Promise<void> {
+  await db.runAsync(
+    `UPDATE products SET reference_price_cents = ?, lowest_price_cents = ?, highest_price_cents = ?,
+      price_source_count = ?, price_searched_at = ? WHERE id = ?;`,
+    summary.referencePriceCents,
+    summary.lowestPriceCents,
+    summary.highestPriceCents,
+    summary.sourceCount,
+    summary.searchedAt,
+    productId,
+  );
 }
 
 export async function saveManualPrice(
@@ -511,6 +692,20 @@ export async function saveManualPrice(
       input.priceCents,
       sourceLabel,
       now,
+    );
+    await db.runAsync(
+      `UPDATE products SET
+        reference_price_cents = (SELECT CAST(ROUND(AVG(price_cents)) AS INTEGER) FROM price_observations WHERE product_id = ? AND source = ?),
+        lowest_price_cents = (SELECT MIN(price_cents) FROM price_observations WHERE product_id = ? AND source = ?),
+        highest_price_cents = (SELECT MAX(price_cents) FROM price_observations WHERE product_id = ? AND source = ?),
+        price_source_count = (SELECT COUNT(*) FROM price_observations WHERE product_id = ? AND source = ?),
+        price_searched_at = ?
+       WHERE id = ?;`,
+      input.productId, MANUAL_STORE_PRICE_SOURCE,
+      input.productId, MANUAL_STORE_PRICE_SOURCE,
+      input.productId, MANUAL_STORE_PRICE_SOURCE,
+      input.productId, MANUAL_STORE_PRICE_SOURCE,
+      now, input.productId,
     );
     if (!previous || changed) {
       await db.runAsync(
@@ -669,7 +864,7 @@ export async function exportCloudBackupSnapshot(db: SQLiteDatabase): Promise<Clo
       tables: {
         stores: await tx.getAllAsync("SELECT id, chain_id, chain_name, branch_name, address, city, state, latitude, longitude, source, source_url, address_verified, is_favorite, is_active, external_store_id, created_at FROM stores;"),
         shopping_lists: await tx.getAllAsync("SELECT id, name, is_favorite, selected_store_id, created_at, updated_at FROM shopping_lists;"),
-        products: await tx.getAllAsync("SELECT id, name, brand, size_value, size_unit, category, product_key, is_favorite, created_at FROM products;"),
+        products: await tx.getAllAsync("SELECT id, name, brand, description, size_value, size_unit, category, barcode, image_url, image_source, image_rights_verified, metadata_source, last_lookup_at, cache_expires_at, reference_price_cents, lowest_price_cents, highest_price_cents, price_source_count, price_searched_at, product_key, is_favorite, created_at FROM products;"),
         list_items: await tx.getAllAsync("SELECT id, list_id, product_id, quantity, created_at FROM list_items;"),
         price_observations: await tx.getAllAsync("SELECT id, product_id, store_id, price_cents, currency, source, source_label, observed_at, availability FROM price_observations;"),
         price_history: await tx.getAllAsync("SELECT id, product_id, store_id, old_price_cents, new_price_cents, source, source_label, changed_at FROM price_history;"),
@@ -709,10 +904,16 @@ export async function restoreCloudBackupSnapshot(db: SQLiteDatabase, snapshotVal
     }
     for (const row of tables.products) {
       await tx.runAsync(
-        `INSERT INTO products (id, name, brand, size_value, size_unit, category, product_key, is_favorite, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-        row.id, row.name, row.brand, row.size_value, row.size_unit, row.category, row.product_key,
-        row.is_favorite, row.created_at,
+        `INSERT INTO products (id, name, brand, description, size_value, size_unit, category, barcode,
+          image_url, image_source, image_rights_verified, metadata_source, last_lookup_at, cache_expires_at,
+          reference_price_cents, lowest_price_cents, highest_price_cents, price_source_count, price_searched_at,
+          product_key, is_favorite, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        row.id, row.name, row.brand, row.description ?? null, row.size_value, row.size_unit, row.category,
+        row.barcode ?? null, row.image_url ?? null, row.image_source ?? null, row.image_rights_verified ?? 0,
+        row.metadata_source ?? null, row.last_lookup_at ?? null, row.cache_expires_at ?? null,
+        row.reference_price_cents ?? null, row.lowest_price_cents ?? null, row.highest_price_cents ?? null,
+        row.price_source_count ?? 0, row.price_searched_at ?? null, row.product_key, row.is_favorite, row.created_at,
       );
     }
     for (const row of tables.shopping_lists) {

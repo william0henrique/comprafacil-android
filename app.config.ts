@@ -48,7 +48,7 @@ const publicRuntime = {
 const config: ExpoConfig = {
   name: env.appName,
   slug: env.appSlug,
-  version: "1.1.0",
+  version: "1.2.0",
   platforms: ["android"],
   extra: publicRuntime,
   orientation: "portrait",
@@ -71,7 +71,7 @@ const config: ExpoConfig = {
     },
     predictiveBackGestureEnabled: false,
     package: env.androidPackage,
-    versionCode: 2,
+    versionCode: 3,
     permissions: ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "POST_NOTIFICATIONS"],
     intentFilters: [
       {
@@ -96,6 +96,7 @@ const config: ExpoConfig = {
     "expo-asset",
     "expo-router",
     "expo-sqlite",
+    ["expo-camera", { cameraPermission: false, microphonePermission: false, recordAudioAndroid: false, barcodeScannerEnabled: true }],
     ["expo-location", { locationWhenInUsePermission: "Permita a localização para encontrar supermercados próximos quando você pedir." }],
     "expo-notifications",
     ["expo-secure-store", { configureAndroidBackup: true }],

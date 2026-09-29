@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeGtin } from "./barcode/product-matcher";
 
 const rowId = z.string().min(1).max(200);
 const text = z.string().max(10_000);
@@ -10,6 +11,7 @@ const nullableInt = z.number().int().nonnegative().nullable();
 const flag = z.union([z.literal(0), z.literal(1)]);
 const isoDate = z.string().datetime({ offset: true });
 const boundedRows = <T extends z.ZodType>(schema: T) => z.array(schema).max(10_000);
+const optionalGtin = z.string().max(14).refine((value) => normalizeGtin(value) === value, "Código de barras/EAN inválido.").nullable().optional();
 
 const storeRowSchema = z.object({
   id: rowId,
@@ -43,9 +45,22 @@ const productRowSchema = z.object({
   id: rowId,
   name: text,
   brand: nullableText,
+  description: nullableText.optional(),
   size_value: finiteNumber.nullable(),
   size_unit: z.enum(["kg", "g", "l", "ml", "un"]).nullable(),
   category: nullableText,
+  barcode: optionalGtin,
+  image_url: nullableText.optional(),
+  image_source: nullableText.optional(),
+  image_rights_verified: flag.optional(),
+  metadata_source: nullableText.optional(),
+  last_lookup_at: isoDate.nullable().optional(),
+  cache_expires_at: isoDate.nullable().optional(),
+  reference_price_cents: nullableInt.optional(),
+  lowest_price_cents: nullableInt.optional(),
+  highest_price_cents: nullableInt.optional(),
+  price_source_count: z.number().int().nonnegative().optional(),
+  price_searched_at: isoDate.nullable().optional(),
   product_key: text,
   is_favorite: flag,
   created_at: isoDate,

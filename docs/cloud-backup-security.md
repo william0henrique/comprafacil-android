@@ -2,11 +2,11 @@
 
 ## Estado atual de publicação
 
-A API de backup está ativa no domínio de produção. Em 29/09/2026, uma consulta somente de leitura com um token descartável retornou HTTP 200 e `exists: false`; nenhum backup de usuário foi lido nem escrito. O fluxo exige o cliente de backup incluído na fonte Android 1.1.0+ e consentimento explícito. As seções seguintes descrevem o contrato. A rota é anônima e tem limites de requisição em memória por processo, mas não possui quota global durável de armazenamento; antes de ampliar a distribuição do APK, é necessário definir uma política de quota e monitoramento.
+A API de backup está ativa no domínio de produção. Em 29/09/2026, uma consulta somente de leitura com um token descartável retornou HTTP 200 e `exists: false`; nenhum backup de usuário foi lido nem escrito. O fluxo exige o cliente de backup incluído na fonte Android 1.1.0+ e consentimento explícito; a fonte atual é 1.2.0. As seções seguintes descrevem o contrato. A rota é anônima e tem limites de requisição em memória por processo, mas não possui quota global durável de armazenamento; antes de ampliar a distribuição do APK, é necessário definir uma política de quota e monitoramento.
 
 ## Decisão de segurança
 
-O SQLite no Android continua sendo a fonte principal. O backup remoto é opcional e só começa após consentimento explícito nas Configurações. O app cria um snapshot JSON versionado no aparelho, cifra-o com **XChaCha20-Poly1305** e envia por HTTPS apenas um envelope com versão, algoritmo, nonce e texto cifrado. O backend não recebe listas, produtos, lojas, endereços/coordenadas salvos, preços, histórico, favoritos ou preferências em texto legível.
+O SQLite no Android continua sendo a fonte principal. O backup remoto é opcional e só começa após consentimento explícito nas Configurações. O app cria um snapshot JSON versionado no aparelho, cifra-o com **XChaCha20-Poly1305** e envia por HTTPS apenas um envelope com versão, algoritmo, nonce e texto cifrado. O backend não recebe listas, produtos, GTIN/EAN, metadados de produto, URLs/origens de imagem autorizada, cache/resumos de preços, lojas, endereços/coordenadas salvos, preços, histórico, favoritos ou preferências em texto legível.
 
 A chave de cifragem e o token de acesso são aleatórios e independentes: cada um tem 32 bytes, gerados com `expo-crypto` e armazenados apenas no `expo-secure-store`, protegido pelo Android Keystore. O token é enviado somente no cabeçalho `Authorization: Bearer`; o MySQL guarda apenas o SHA-256 do token. O token não é uma chave de cifragem. Cada cifragem usa um nonce aleatório de 24 bytes.
 
@@ -14,7 +14,7 @@ O snapshot em texto claro fica limitado a 1.000.000 bytes no cliente. O envelope
 
 ## Dados e metadados
 
-O snapshot inclui lojas salvas — inclusive endereço e coordenadas quando presentes —, listas, itens, produtos, preços e histórico manual, preferências de alertas, eventos e preferência de recomendação. Chaves, token e estado local de sincronização ficam fora do snapshot. O servidor armazena o envelope cifrado, o hash de identificação, a revisão e o horário da atualização; a revisão é apenas um contador, não um histórico de versões.
+O snapshot inclui lojas salvas — inclusive endereço e coordenadas quando presentes —, listas, itens, produtos (incluindo EAN, origem de metadados/imagem, validade do cache e resumo local de preços), preços e histórico manual, preferências de alertas, eventos e preferência de recomendação. Chaves, token e estado local de sincronização ficam fora do snapshot. O servidor armazena o envelope cifrado, o hash de identificação, a revisão e o horário da atualização; a revisão é apenas um contador, não um histórico de versões.
 
 O serviço processa o IP da requisição para rede/limitação de taxa; o código do endpoint não grava o IP junto ao registro de backup. A infraestrutura de rede pode processar metadados de conexão. Tamanho aproximado do payload, horários, hash de instalação, revisão, algoritmo e nonce não são ocultados pela cifragem.
 
