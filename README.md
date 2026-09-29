@@ -1,6 +1,6 @@
 # CompraFácil — Android
 
-O **CompraFácil** organiza listas de compras, registra preços informados pela própria pessoa e compara o total conhecido entre supermercados. A versão Android **1.1.0** é local-first: não exige conta nem login. O SQLite do aparelho continua sendo a fonte principal; existe um backup remoto **opcional**, criptografado no Android e ativado apenas por consentimento.
+O **CompraFácil** organiza listas de compras, registra preços informados pela própria pessoa e compara o total conhecido entre supermercados. O código-fonte Android **1.1.0** é local-first: não exige conta nem login. O SQLite do aparelho continua sendo a fonte principal; o app 1.1.0 inclui backup remoto **opcional**, criptografado no Android e ativado apenas por consentimento.
 
 > **Transparência de preços:** nesta versão, os únicos preços utilizados são os digitados manualmente. Não há preço automático de supermercado, referência ativa do Mercado Livre, estimativa baseada em anúncios ou preço fictício apresentado como real.
 
@@ -22,7 +22,7 @@ Quando uma Release verificada estiver disponível, baixe o APK anexado à Releas
 - Salva favoritos, preferências, histórico de alterações de preços e eventos localmente.
 - Pode solicitar localização em primeiro plano quando a pessoa inicia uma busca ou comparação; a localização é opcional.
 - Oferece notificações Android locais para eventos e limites associados a preços informados manualmente, quando a permissão é concedida.
-- Contém o fluxo de backup remoto opcional, cifrado no próprio Android; a API 1.1.0 ainda não foi publicada, portanto o backup remoto permanece indisponível nesta entrega.
+- Oferece backup remoto opcional, cifrado no próprio Android. A API está ativa no domínio de produção; o fluxo exige a versão do app que contém o cliente de backup (fonte 1.1.0+) e consentimento explícito.
 
 ## Lista, quantidade e totais
 
@@ -57,7 +57,7 @@ Cada novo preço manual pode registrar a alteração no histórico local. Notifi
 
 ## Dados e backup criptografado
 
-Listas, produtos, lojas, favoritos, preferências, preços e histórico permanecem no SQLite local. O código-fonte inclui um backup remoto opcional, sem conta nem sincronização entre aparelhos, mas a API correspondente à versão 1.1.0 ainda não está publicada no domínio de produção. **Não considere o backup remoto disponível até a publicação autorizada dessa API.**
+Listas, produtos, lojas, favoritos, preferências, preços e histórico permanecem no SQLite local. A API de backup está ativa no domínio de produção. O backup remoto é opcional, não cria conta e não sincroniza aparelhos; requer a versão do app cujo código inclui o cliente (1.1.0+) e consentimento explícito. Ainda não há APK 1.1.0 publicado.
 
 Quando a API estiver disponível, o fluxo será:
 

@@ -2,7 +2,7 @@
 
 ## Estado atual de publicação
 
-O código da API e a migração estão no projeto, mas a revisão 1.1.0 do backend ainda não foi publicada no domínio de produção; por isso, o endpoint não está disponível e o backup remoto não pode ser usado nesta entrega. As seções seguintes descrevem o contrato da implementação. A rota é anônima e tem limites de requisição em memória por processo, mas não possui quota global durável de armazenamento; antes de ativá-la para distribuição pública, é necessário definir uma política de quota e monitoramento.
+A API de backup está ativa no domínio de produção. Em 29/09/2026, uma consulta somente de leitura com um token descartável retornou HTTP 200 e `exists: false`; nenhum backup de usuário foi lido nem escrito. O fluxo exige o cliente de backup incluído na fonte Android 1.1.0+ e consentimento explícito. As seções seguintes descrevem o contrato. A rota é anônima e tem limites de requisição em memória por processo, mas não possui quota global durável de armazenamento; antes de ampliar a distribuição do APK, é necessário definir uma política de quota e monitoramento.
 
 ## Decisão de segurança
 
