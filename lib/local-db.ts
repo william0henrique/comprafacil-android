@@ -2,10 +2,13 @@ import type { SQLiteDatabase } from "expo-sqlite";
 import {
   crossesPriceThreshold,
   formatBRL,
+  isComparableStorePriceSource,
+  MANUAL_STORE_PRICE_SOURCE,
   makeProductKey,
   makeProductIdentity,
   normalizeText,
   type MeasurementUnit,
+  type StorePrice,
 } from "./domain";
 
 export type ShoppingList = {
@@ -251,10 +254,10 @@ export async function getLists(db: SQLiteDatabase): Promise<ShoppingList[]> {
       SUM(CASE WHEN li.id IS NOT NULL AND po.price_cents IS NULL THEN 1 ELSE 0 END) AS missingCount
     FROM shopping_lists l
     LEFT JOIN list_items li ON li.list_id = l.id
-    LEFT JOIN price_observations po ON po.product_id = li.product_id AND po.store_id = l.selected_store_id
+    LEFT JOIN price_observations po ON po.product_id = li.product_id AND po.store_id = l.selected_store_id AND po.source = ?
     GROUP BY l.id
     ORDER BY l.updated_at DESC;
-  `);
+  `, MANUAL_STORE_PRICE_SOURCE);
   return rows.map(({ rawTotal, ...row }) => ({
     ...row,
     isFavorite: Boolean(row.isFavorite),
@@ -317,10 +320,10 @@ export async function getListItems(db: SQLiteDatabase, listId: string): Promise<
     FROM list_items li
     JOIN products p ON p.id = li.product_id
     JOIN shopping_lists l ON l.id = li.list_id
-    LEFT JOIN price_observations po ON po.product_id = p.id AND po.store_id = l.selected_store_id
+    LEFT JOIN price_observations po ON po.product_id = p.id AND po.store_id = l.selected_store_id AND po.source = ?
     WHERE li.list_id = ?
     ORDER BY li.created_at ASC;
-  `, listId).then((rows) => rows.map((row) => ({ ...row, isFavorite: Boolean(row.isFavorite) })));
+  `, MANUAL_STORE_PRICE_SOURCE, listId).then((rows) => rows.map((row) => ({ ...row, isFavorite: Boolean(row.isFavorite) })));
 }
 
 export async function addProductToList(
@@ -480,9 +483,10 @@ export async function saveManualPrice(
   input: { productId: string; storeId: string; priceCents: number; productName: string; storeName: string },
 ): Promise<PriceSaveResult> {
   const previous = await db.getFirstAsync<{ id: string; price_cents: number }>(
-    "SELECT id, price_cents FROM price_observations WHERE product_id = ? AND store_id = ?;",
+    "SELECT id, price_cents FROM price_observations WHERE product_id = ? AND store_id = ? AND source = ?;",
     input.productId,
     input.storeId,
+    MANUAL_STORE_PRICE_SOURCE,
   );
   const now = new Date().toISOString();
   const sourceLabel = "Informado manualmente pelo usuário";
@@ -559,8 +563,8 @@ export async function getPriceHistory(db: SQLiteDatabase, productId: string): Pr
       h.changed_at AS changedAt, h.source_label AS sourceLabel,
       s.chain_name AS storeName, s.branch_name AS branchName
     FROM price_history h JOIN stores s ON s.id = h.store_id
-    WHERE h.product_id = ? ORDER BY h.changed_at DESC;
-  `, productId);
+    WHERE h.product_id = ? AND h.source = ? ORDER BY h.changed_at DESC;
+  `, productId, MANUAL_STORE_PRICE_SOURCE);
 }
 
 export async function getProductPriceRows(db: SQLiteDatabase, productId: string): Promise<Array<{ storeId: string; storeName: string; branchName: string | null; priceCents: number; sourceLabel: string; observedAt: string }>> {
@@ -568,15 +572,15 @@ export async function getProductPriceRows(db: SQLiteDatabase, productId: string)
     SELECT po.store_id AS storeId, s.chain_name AS storeName, s.branch_name AS branchName,
       po.price_cents AS priceCents, po.source_label AS sourceLabel, po.observed_at AS observedAt
     FROM price_observations po JOIN stores s ON s.id = po.store_id
-    WHERE po.product_id = ? ORDER BY po.price_cents ASC;
-  `, productId);
+    WHERE po.product_id = ? AND po.source = ? ORDER BY po.price_cents ASC;
+  `, productId, MANUAL_STORE_PRICE_SOURCE);
 }
 
 export async function getListComparisonData(db: SQLiteDatabase, listId: string): Promise<{
   listName: string;
   items: Array<{ productId: string; quantity: number; productName: string; sizeValue: number | null; sizeUnit: MeasurementUnit | null }>;
   stores: Store[];
-  prices: Map<string, number>;
+  prices: Map<string, StorePrice>;
 } | null> {
   const list = await db.getFirstAsync<{ name: string }>("SELECT name FROM shopping_lists WHERE id = ?;", listId);
   if (!list) return null;
@@ -585,13 +589,17 @@ export async function getListComparisonData(db: SQLiteDatabase, listId: string):
     FROM list_items li JOIN products p ON p.id = li.product_id WHERE li.list_id = ? ORDER BY p.name COLLATE NOCASE;
   `, listId);
   const stores = await getStores(db);
-  const priceRows = await db.getAllAsync<{ storeId: string; productId: string; priceCents: number }>(`
-    SELECT po.store_id AS storeId, po.product_id AS productId, po.price_cents AS priceCents
+  const priceRows = await db.getAllAsync<{ storeId: string; productId: string; priceCents: number; source: string }>(`
+    SELECT po.store_id AS storeId, po.product_id AS productId, po.price_cents AS priceCents, po.source AS source
     FROM price_observations po JOIN list_items li ON li.product_id = po.product_id
-    WHERE li.list_id = ?;
-  `, listId);
-  const prices = new Map<string, number>();
-  for (const row of priceRows) prices.set(`${row.storeId}:${row.productId}`, row.priceCents);
+    WHERE li.list_id = ? AND po.source = ?;
+  `, listId, MANUAL_STORE_PRICE_SOURCE);
+  const prices = new Map<string, StorePrice>();
+  for (const row of priceRows) {
+    if (isComparableStorePriceSource(row.source)) {
+      prices.set(`${row.storeId}:${row.productId}`, { priceCents: row.priceCents, source: row.source });
+    }
+  }
   return { listName: list.name, items, stores, prices };
 }
 

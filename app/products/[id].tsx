@@ -7,6 +7,7 @@ import { Dimensions, StyleSheet, Text, View } from "react-native";
 import { AppScreen, Badge, C, Card, EmptyState, IconButton, PageHeading, SecondaryButton, textStyles } from "@/components/comprafacil-ui";
 import { formatBRL } from "@/lib/domain";
 import { getPriceHistory, getProduct, getProductPriceRows, toggleProductFavorite, type PriceHistoryItem, type Product } from "@/lib/local-db";
+import { MARKETPLACE_REFERENCE_DISABLED_MESSAGE } from "@/lib/marketplace-provider";
 
 function dateLabel(value: string): string {
   const date = new Date(value);
@@ -57,6 +58,8 @@ export default function ProductDetailScreen() {
       <PageHeading title="Produto" subtitle="Detalhes e histórico local." action={<IconButton icon={product.isFavorite ? "heart" : "heart-outline"} label={product.isFavorite ? "Remover favorito" : "Favoritar"} tint={product.isFavorite ? C.coral : C.leaf} onPress={() => { void toggleProductFavorite(db, product.id).then(refresh); }} />} />
       <Card style={styles.productCard}><View style={styles.productIcon}><Ionicons name="cube-outline" size={29} color={C.leaf} /></View><Text style={styles.productName}>{product.name}</Text><Text style={styles.productMeta}>{[product.brand, size, product.category].filter(Boolean).join(" · ")}</Text><Badge tone="neutral">Correspondência local por tamanho exato</Badge><Text style={textStyles.secondary}>Embalagens de tamanhos diferentes permanecem como produtos separados. Não foi aplicado preço unitário estimado.</Text></Card>
 
+      <Card style={styles.marketplaceCard}><View style={styles.historyHead}><View style={{ flex: 1 }}><Text style={styles.heading}>Referência de marketplace</Text><Text style={textStyles.secondary}>Mercado Livre · consulta desativada</Text></View><Badge tone="neutral">Indisponível</Badge></View><Text style={textStyles.secondary}>{MARKETPLACE_REFERENCE_DISABLED_MESSAGE}</Text></Card>
+
       <View style={styles.sectionTitle}><Text style={styles.heading}>Preços anotados</Text><Badge tone={priceRows.length ? "amber" : "neutral"}>{priceRows.length ? "Manuais" : "Nenhum"}</Badge></View>
       {!priceRows.length ? <Card><EmptyState icon="pricetag-outline" title="Sem preço registrado" body="Adicione o produto a uma lista e informe manualmente o valor da unidade desejada." /></Card> : priceRows.map((row) => <Card key={row.storeId} style={styles.priceCard}><View style={{ flex: 1 }}><Text style={styles.storeName}>{row.storeName}{row.branchName ? ` — ${row.branchName}` : ""}</Text><Text style={textStyles.secondary}>{row.sourceLabel} · {dateLabel(row.observedAt)}</Text></View><Text style={styles.priceValue}>{formatBRL(row.priceCents)}</Text></Card>)}
 
@@ -73,6 +76,7 @@ export default function ProductDetailScreen() {
 
 const styles = StyleSheet.create({
   productCard: { alignItems: "center", paddingVertical: 22 },
+  marketplaceCard: { backgroundColor: C.paper, borderColor: C.border },
   productIcon: { width: 66, height: 66, borderRadius: 21, backgroundColor: C.paleGreen, alignItems: "center", justifyContent: "center" },
   productName: { color: C.leafDark, fontSize: 22, fontWeight: "900", textAlign: "center", marginTop: 4 },
   productMeta: { color: C.muted, fontSize: 14, textAlign: "center", lineHeight: 20 },

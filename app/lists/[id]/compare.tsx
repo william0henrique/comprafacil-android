@@ -87,7 +87,7 @@ export default function CompareListScreen() {
       <PageHeading title="Comparar lista" subtitle={listName ? `“${listName}” · ${itemsCount} ${itemsCount === 1 ? "item" : "itens"}` : "Preços registrados por loja."} />
       <Card style={styles.infoCard}>
         <View style={styles.infoRow}><Ionicons name="information-circle-outline" size={21} color={C.leaf} /><Text style={styles.infoText}>A comparação usa apenas preços anotados. Produtos sem preço aparecem como faltantes e não entram na soma.</Text></View>
-        <Text style={styles.infoFoot}>Os valores atuais são registros manuais; não há feed autorizado do SuperLuna conectado.</Text>
+        <Text style={styles.infoFoot}>Os valores atuais são registros manuais; não há feed autorizado do SuperLuna conectado. A referência do Mercado Livre está desativada e anúncios de marketplace nunca entram no total, ranking ou recomendação de supermercados.</Text>
       </Card>
 
       <View style={{ gap: 9 }}><Text style={styles.sectionTitle}>O que é mais importante?</Text><View style={styles.preferenceRow}>{PREFERENCES.map((option) => <Pressable key={option.id} onPress={() => { void choosePreference(option.id); }} style={[styles.preference, preference === option.id && styles.preferenceActive]}><Ionicons name={option.icon} size={16} color={preference === option.id ? C.paper : C.leaf} /><Text style={[styles.preferenceText, preference === option.id && { color: C.paper }]}>{option.label}</Text></Pressable>)}</View></View>

@@ -6,6 +6,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { AppScreen, Badge, C, Card, IconButton, PageHeading, PrimaryButton, SectionTitle, textStyles } from "@/components/comprafacil-ui";
 import { formatBRL } from "@/lib/domain";
 import { getLists, type ShoppingList } from "@/lib/local-db";
+import { MARKETPLACE_REFERENCE_DISABLED_MESSAGE } from "@/lib/marketplace-provider";
 
 export default function HomeScreen() {
   const db = useSQLiteContext();
@@ -65,6 +66,15 @@ export default function HomeScreen() {
         <Pressable onPress={() => router.push("/stores")} style={styles.textAction}><Text style={styles.link}>Ver unidades cadastradas</Text><Ionicons name="arrow-forward" size={16} color={C.leaf} /></Pressable>
       </Card>
 
+      <Card style={styles.marketplaceCard}>
+        <View style={styles.superlunaHeader}>
+          <View style={styles.storeIcon}><Ionicons name="pricetag-outline" size={21} color={C.leaf} /></View>
+          <View style={{ flex: 1 }}><Text style={styles.cardTitle}>Mercado Livre · referência de marketplace</Text><Text style={textStyles.secondary}>Não é supermercado</Text></View>
+          <Badge tone="neutral">Desativada</Badge>
+        </View>
+        <Text style={styles.superlunaBody}>{MARKETPLACE_REFERENCE_DISABLED_MESSAGE}</Text>
+      </Card>
+
       <View style={styles.quickRow}>
         <Pressable style={styles.quickCard} onPress={() => router.push("/products")}><Ionicons name="cube-outline" size={22} color={C.leaf} /><Text style={styles.quickTitle}>Meus produtos</Text><Text style={textStyles.secondary}>Produtos cadastrados por você</Text></Pressable>
         <Pressable style={styles.quickCard} onPress={() => router.push("/settings")}><Ionicons name="options-outline" size={22} color={C.leaf} /><Text style={styles.quickTitle}>Preferências</Text><Text style={textStyles.secondary}>Critério de comparação</Text></Pressable>
@@ -91,6 +101,7 @@ const styles = StyleSheet.create({
   totalLabel: { color: C.muted, fontSize: 12 },
   totalValue: { color: C.leafDark, fontSize: 21, fontWeight: "800", marginTop: 3 },
   superlunaCard: { backgroundColor: "#FFFCF5", borderColor: "#F0E6D2" },
+  marketplaceCard: { backgroundColor: C.paper, borderColor: C.border },
   superlunaHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
   storeIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: C.paleAmber, alignItems: "center", justifyContent: "center" },
   superlunaBody: { color: C.muted, fontSize: 13, lineHeight: 19 },

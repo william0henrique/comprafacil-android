@@ -48,7 +48,12 @@ describe("CompraFácil local shopping rules", () => {
     const comparisons = compareStores(
       [{ productId: "a", quantity: 1 }, { productId: "b", quantity: 2 }],
       [{ id: "one", name: "Loja 1" }, { id: "two", name: "Loja 2" }],
-      new Map([["one:a", 100], ["one:b", 200], ["two:a", 80]]),
+      new Map([
+        ["one:a", { priceCents: 100, source: "user_manual" }],
+        ["one:b", { priceCents: 200, source: "user_manual" }],
+        ["two:a", { priceCents: 80, source: "user_manual" }],
+        ["two:b", { priceCents: 1, source: "marketplace_reference" }],
+      ]),
     );
     expect(comparisons).toEqual([
       { storeId: "one", storeName: "Loja 1", totalCents: 500, pricedCount: 2, missingCount: 0 },

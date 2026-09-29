@@ -29,7 +29,13 @@ export type StoreComparison = {
   missingCount: number;
 };
 
-export type PriceMap = ReadonlyMap<string, number>;
+export const MANUAL_STORE_PRICE_SOURCE = "user_manual" as const;
+export type StorePrice = { priceCents: number; source: string };
+export type PriceMap = ReadonlyMap<string, StorePrice>;
+
+export function isComparableStorePriceSource(source: string): boolean {
+  return source === MANUAL_STORE_PRICE_SOURCE;
+}
 
 export function normalizeText(value: string | null | undefined): string {
   return (value ?? "")
@@ -113,9 +119,9 @@ export function compareStores(
     let totalCents = 0;
     let pricedCount = 0;
     for (const item of items) {
-      const unitPrice = prices.get(`${store.id}:${item.productId}`);
-      if (unitPrice == null) continue;
-      totalCents += Math.round(unitPrice * item.quantity);
+      const observation = prices.get(`${store.id}:${item.productId}`);
+      if (!observation || !isComparableStorePriceSource(observation.source)) continue;
+      totalCents += Math.round(observation.priceCents * item.quantity);
       pricedCount += 1;
     }
     return {

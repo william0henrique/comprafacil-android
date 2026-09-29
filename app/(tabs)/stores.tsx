@@ -8,6 +8,7 @@ import { getApiBaseUrl } from "@/constants/api";
 import { haversineKm } from "@/lib/domain";
 import { getForegroundLocation, openDirections, type Coordinates } from "@/lib/location";
 import { createStore, getStores, isSuperLunaStore, toggleStoreFavorite, type Store } from "@/lib/local-db";
+import { MARKETPLACE_REFERENCE_DISABLED_MESSAGE } from "@/lib/marketplace-provider";
 import { trpc } from "@/lib/trpc";
 import type { NearbyMarket, NearbySearchResult } from "@/server/maps";
 
@@ -86,6 +87,10 @@ export default function StoresScreen() {
         <View style={styles.sourceHeader}><View style={styles.storeIcon}><Ionicons name="storefront-outline" size={21} color={C.leaf} /></View><View style={{ flex: 1 }}><Text style={styles.cardTitle}>SuperLuna Supermercados</Text><Text style={textStyles.secondary}>Rede cadastrada · sem integração de preços</Text></View><Badge tone="amber">Indisponível</Badge></View>
         <Text style={textStyles.secondary}>A loja online retornou HTTP 403 da CloudFront e não foi confirmada uma API/feed com autorização para coleta. Nenhum produto ou preço foi importado.</Text>
       </Card>
+      <Card style={styles.marketplaceCard}>
+        <View style={styles.sourceHeader}><View style={styles.storeIcon}><Ionicons name="pricetag-outline" size={21} color={C.leaf} /></View><View style={{ flex: 1 }}><Text style={styles.cardTitle}>Mercado Livre · referência de marketplace</Text><Text style={textStyles.secondary}>Fonte separada de supermercados</Text></View><Badge tone="neutral">Desativada</Badge></View>
+        <Text style={textStyles.secondary}>{MARKETPLACE_REFERENCE_DISABLED_MESSAGE}</Text>
+      </Card>
 
       <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Unidades SuperLuna identificadas</Text><Badge tone="neutral">Endereços não confirmados</Badge></View>
       {superluna.map((store) => (
@@ -135,6 +140,7 @@ export default function StoresScreen() {
 
 const styles = StyleSheet.create({
   sourceCard: { backgroundColor: "#FFFCF5", borderColor: "#F0E6D2" },
+  marketplaceCard: { backgroundColor: C.paper, borderColor: C.border },
   sourceHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
   storeIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: C.paleAmber, alignItems: "center", justifyContent: "center" },
   cardTitle: { color: C.leafDark, fontSize: 15, fontWeight: "800" },
