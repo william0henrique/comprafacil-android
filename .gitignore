@@ -10,6 +10,7 @@ node_modules/
 dist/
 web-build/
 expo-env.d.ts
+.manus-starter-init.json
 
 # Native
 .kotlin/
@@ -19,6 +20,9 @@ expo-env.d.ts
 *.p12
 *.key
 *.mobileprovision
+*.keystore
+google-services.json
+GoogleService-Info.plist
 
 # Metro
 .metro-health-check*
@@ -33,6 +37,10 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
+.env.*
+!.env.example
+!.env.*.example
 .env*.local
 
 # typescript
@@ -62,6 +70,10 @@ Thumbs.db
 *.tgz
 *.tar.gz
 .cache/
+*.apk
+*.aab
+*.sqlite
+*.db
 
 # Webdev artifacts (checkpoint zips, migrations, etc.)
 .webdev/

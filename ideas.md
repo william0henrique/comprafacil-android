@@ -30,7 +30,7 @@
 6. **Supermercados e unidades:** SuperLuna permanece cadastrado sem preço online; nomes de unidades citados em diretório público são exibidos sem inventar endereço ou identificador de filial do e-commerce. Busca de supermercados próximos é opcional e sob demanda; locais do Maps podem ser salvos neste aparelho, lojas manuais não são marcadas como verificadas e a rota só abre quando há endereço/coordenadas.
 7. **Favoritos:** listas, produtos e supermercados favoritados, com atalhos para abrir.
 8. **Alertas:** preferências locais para mudanças de preço e limite; caixa de entrada de eventos; solicitar permissão Android de notificação em contexto apropriado; explicar que não há alertas automáticos de mercado enquanto não existir fonte ativa.
-9. **Configurações:** preferência de recomendação (menor preço, menor distância ou equilíbrio), versão do app, informação de armazenamento local, ausência de conta/sincronização e limites atuais da fonte de preços.
+9. **Configurações:** preferência de recomendação, versão do app, dados guardados localmente e painel de backup opcional criptografado no Android; explicar que não há conta, recuperação de chave ou sincronização entre aparelhos.
 
 ## Fluxos de toque
 
@@ -41,10 +41,12 @@
 - **Favoritar:** tocar estrela/coração em lista, produto ou supermercado → persistir localmente sem conta.
 - **Localização:** Supermercados → “Buscar perto de mim” → solicitar permissão foreground Android; se negada, continuar com seleção manual sem distância.
 - **Notificações:** Alertas → habilitar um tipo → explicar finalidade → solicitar POST_NOTIFICATIONS no Android no contexto; se negada, manter caixa de entrada local.
+- **Backup criptografado:** Configurações → ler o aviso de envio e perda irrecuperável da chave → habilitar explicitamente → a cópia é cifrada no dispositivo antes do envio; depois disso, alterações são enviadas quando o app está ativo e uma tentativa é feita ao abrir o app. Offline, a edição local continua; restauração substitui os dados locais somente após confirmação; pausar mantém a cópia remota; excluir a cópia é ação separada e destrutiva.
 
 ## Restrições visuais e de dados
 
 - Não incluir produto, imagem, preço, oferta, loja ou distância inventados como se fossem reais.
 - O cadastro SuperLuna deve deixar explícito que preço automático está indisponível; não criar coletor ou endpoint de fornecedor sem autorização confirmada.
-- Não mostrar login, cadastro, perfil, sessão, sincronização ou promessa de nuvem.
+- Não mostrar login, cadastro ou perfil. A chave de backup é da instalação e fica no Android; o servidor recebe somente um token de acesso e o snapshot cifrado. O backup não pode ser transferido para outro aparelho. Se a chave local for perdida, a cópia remota não pode ser recuperada.
+- SQLite continua sendo a fonte local principal. Não executar sincronização sem consentimento; exibir claramente o estado e a última confirmação de envio. Não prometer execução agendada em segundo plano.
 - Android apenas nesta versão; não investir em experiência iOS, navegador ou PWA.
