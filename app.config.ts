@@ -30,32 +30,15 @@ const env = {
   // App branding - update these values directly (do not use env vars)
   appName: "CompraFácil",
   appSlug: "comprafacil",
-  // S3 URL of the app logo - set this to the URL returned by generate_image when creating custom logo
-  // Leave empty to use the default icon from assets/images/icon.png
-  logoUrl: "",
+  // Durable public logo URL used by managed project/checkpoint branding.
+  logoUrl: "https://files.manuscdn.com/user_upload_by_module/session_file/310519663986388000/LgkemaJqLwdhLtqp.png",
   scheme: schemeFromBundleId,
   iosBundleId: bundleId,
   androidPackage: bundleId,
 };
 
-// Expo serializes this browser-safe subset into native and web bundles. The server-only
-// MANUS_API_KEY and MANUS_JWT_SECRET must never enter this object.
+// Only the API base is public. The Android app has no login/session configuration.
 const publicRuntime = {
-  oauthPortalUrl:
-    process.env.MANUS_OAUTH_PORTAL_URL ??
-    process.env.VITE_OAUTH_PORTAL_URL ??
-    process.env.EXPO_PUBLIC_OAUTH_PORTAL_URL ??
-    "",
-  oauthServerUrl:
-    process.env.MANUS_OAUTH_API_URL ??
-    process.env.OAUTH_SERVER_URL ??
-    process.env.EXPO_PUBLIC_OAUTH_SERVER_URL ??
-    "",
-  appId:
-    process.env.MANUS_PROJECT_ID ??
-    process.env.VITE_APP_ID ??
-    process.env.EXPO_PUBLIC_APP_ID ??
-    "",
   apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL ?? "",
 };
 
@@ -63,6 +46,7 @@ const config: ExpoConfig = {
   name: env.appName,
   slug: env.appSlug,
   version: "1.0.0",
+  platforms: ["android"],
   extra: publicRuntime,
   orientation: "portrait",
   icon: "./assets/images/icon.png",
@@ -77,14 +61,15 @@ const config: ExpoConfig = {
   },
   android: {
     adaptiveIcon: {
-      backgroundColor: "#E6F4FE",
+      backgroundColor: "#FFF8EC",
       foregroundImage: "./assets/images/android-icon-foreground.png",
       backgroundImage: "./assets/images/android-icon-background.png",
       monochromeImage: "./assets/images/android-icon-monochrome.png",
     },
     predictiveBackGestureEnabled: false,
     package: env.androidPackage,
-    permissions: ["POST_NOTIFICATIONS"],
+    versionCode: 1,
+    permissions: ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "POST_NOTIFICATIONS"],
     intentFilters: [
       {
         action: "VIEW",
@@ -107,28 +92,18 @@ const config: ExpoConfig = {
   plugins: [
     "expo-asset",
     "expo-router",
-    [
-      "expo-audio",
-      {
-        microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone.",
-      },
-    ],
-    [
-      "expo-video",
-      {
-        supportsBackgroundPlayback: true,
-        supportsPictureInPicture: true,
-      },
-    ],
+    "expo-sqlite",
+    ["expo-location", { locationWhenInUsePermission: "Permita a localização para encontrar supermercados próximos quando você pedir." }],
+    "expo-notifications",
     [
       "expo-splash-screen",
       {
         image: "./assets/images/splash-icon.png",
         imageWidth: 200,
         resizeMode: "contain",
-        backgroundColor: "#ffffff",
+        backgroundColor: "#FFF8EC",
         dark: {
-          backgroundColor: "#000000",
+          backgroundColor: "#FFF8EC",
         },
       },
     ],
