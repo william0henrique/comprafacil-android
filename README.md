@@ -1,103 +1,167 @@
 # CompraFácil — Android
 
-O **CompraFácil** organiza listas de compras, registra preços informados pela própria pessoa e compara o total conhecido entre supermercados. O código-fonte Android **1.1.0** é local-first: não exige conta nem login. O SQLite do aparelho continua sendo a fonte principal; o app 1.1.0 inclui backup remoto **opcional**, criptografado no Android e ativado apenas por consentimento.
+O **CompraFácil** organiza listas de compras, salva produtos e favoritos, registra preços informados pela pessoa e mostra referências locais claramente identificadas. O código-fonte atual é **1.2.0** (`versionCode` 3). O armazenamento principal é o SQLite do Android; não há conta, login ou cadastro obrigatório. Um backup remoto opcional só é enviado depois de ativação expressa e criptografia no aparelho.
 
-> **Transparência de preços:** nesta versão, os únicos preços utilizados são os digitados manualmente. Não há preço automático de supermercado, referência ativa do Mercado Livre, estimativa baseada em anúncios ou preço fictício apresentado como real.
+> **Transparência:** nenhum preço automático de supermercado ou anúncio está ativo. O app não inventa produtos, imagens ou preços. Preços manuais continuam identificados como informados pela pessoa; médias são referências, não cotações confirmadas por lojas.
 
-## Download
+## 1. Download e estado do APK
 
-- [Abrir a página de Releases](https://github.com/william0henrique/comprafacil-android/releases)
+- [Abrir as Releases do CompraFácil no GitHub](https://github.com/william0henrique/comprafacil-android/releases)
 
-**Ainda não há um APK 1.1.0 gerado e validado publicado.** O código está preparado para a geração Android pelo Dashboard do projeto Mobile; a página de Releases só deve receber o APK correspondente depois que esse build terminar e sua versão for conferida. Um arquivo APK anterior, inclusive um arquivo chamado `v1.0.1`, não é considerado build da fonte 1.1.0.
+Ainda não há um APK **1.2.0** publicado e verificado nesta documentação. Uma compilação de versão anterior não representa o código atual. A Release só deve ser criada depois de o APK ser obtido, conferido quanto à versão e integridade e associado ao commit correspondente.
 
-Quando uma Release verificada estiver disponível, baixe o APK anexado à Release. No Android, abra o arquivo baixado, permita a instalação para o aplicativo de origem quando solicitado e confirme. Instale apenas APKs anexados a Releases deste repositório.
+Quando uma Release Android validada estiver disponível, baixe o APK anexado à Release. No Android, abra o arquivo, autorize a instalação para o aplicativo de origem se o sistema solicitar e confirme. Instale apenas APKs anexados às Releases deste repositório.
 
-## O que o app faz
+## 2. Objetivo
 
-- Cria e mantém listas no Android, com produtos, marca, categoria, tamanho, unidade e quantidade.
-- Mantém produtos de tamanhos diferentes separados, por exemplo, arroz de 1 kg e arroz de 5 kg.
-- Calcula subtotais multiplicando quantidade pelo preço registrado. Itens sem preço são identificados e não recebem valores estimados ou inventados.
-- Registra manualmente um preço por produto e unidade de supermercado, com origem explícita e data/hora.
-- Compara listas usando somente preços manuais registrados naquela loja/unidade. Totais parciais informam itens ainda sem preço.
-- Salva favoritos, preferências, histórico de alterações de preços e eventos localmente.
-- Pode solicitar localização em primeiro plano quando a pessoa inicia uma busca ou comparação; a localização é opcional.
-- Oferece notificações Android locais para eventos e limites associados a preços informados manualmente, quando a permissão é concedida.
-- Oferece backup remoto opcional, cifrado no próprio Android. A API está ativa no domínio de produção; o fluxo exige a versão do app que contém o cliente de backup (fonte 1.1.0+) e consentimento explícito.
+A primeira versão prioriza uma experiência móvel prática: criar listas, registrar quantidades e preços, comparar valores anotados entre lojas e manter dados no aparelho. Os preços automáticos dependem de autorização verificável do fornecedor e permanecem desligados enquanto essa autorização não existir.
 
-## Lista, quantidade e totais
+## 3. Plataforma suportada
 
-Cada item da lista referencia um produto e guarda sua quantidade. Quando existe um preço manual para a loja escolhida, o subtotal do item é quantidade × preço unitário registrado; o total soma os subtotais conhecidos. Produtos sem preço permanecem sem estimativa e são indicados à parte. O total não representa uma cotação completa quando há itens sem preço.
+O aplicativo é **Android-only** nesta versão. iOS, navegador, Web e PWA não são plataformas de entrega ou build. A configuração fonte restringe as plataformas a Android.
 
-## Comparação entre supermercados
+## 4. Recursos principais
 
-A comparação considera as lojas/unidades salvas e apenas os preços manuais associados à unidade correspondente. Mostra quantos itens têm preço conhecido e quantos continuam sem preço, sem tratar um total parcial como cotação completa. Anúncios do Mercado Livre não entram em totais, ranking ou recomendação de supermercados.
+- Listas e itens locais, com produto, marca, categoria, tamanho, unidade e quantidade.
+- Cadastro de produtos e favoritos no SQLite do aparelho.
+- Scanner Android de código de barras aberto somente quando a pessoa toca em **Escanear código de barras**.
+- Histórico de alterações de preços e notificações Android locais para entradas manuais, sujeitos à permissão do sistema.
+- Comparação entre supermercados usando exclusivamente preços manuais daquela loja/unidade.
+- Localização opcional em primeiro plano para recursos de proximidade.
+- Backup remoto opcional, sem conta, cifrado no aparelho antes do envio.
 
-## Localização
+## 5. Contas e autenticação
 
-A localização é solicitada somente após uma ação iniciada pela pessoa e é usada em primeiro plano. A distância pode influenciar a recomendação de loja ou ser usada para abrir uma rota. Uma consulta ao serviço opcional de lojas próximas pode enviar as coordenadas daquela busca à API configurada; a posição atual não é guardada como rastreamento pelo app. Endereço e coordenadas de uma loja que a pessoa salvar podem permanecer no SQLite e, se o backup opcional for ativado, dentro do snapshot cifrado.
+Não há cadastro, login, e-mail, senha ou provedor externo de autenticação. Listas, produtos e configurações podem ser usados localmente sem criar uma conta. O backup é opcional, não sincroniza aparelhos e não identifica a pessoa por uma conta.
 
-## Pesquisa de preços e estimativas
+## 6. Fluxo de leitura de código de barras
 
-O app **não consulta preços de supermercado nem pesquisa anúncios do Mercado Livre**. Os produtos e preços utilizados para listas/comparações são inseridos manualmente. A integração automática do SuperLuna permanece desligada: o site respondeu HTTP 403 da CloudFront no acesso público normal e não foi confirmada uma API/feed autorizada. O bloqueio não foi contornado.
+Na tela **Adicionar produto**, a pessoa pode escolher **Pesquisar produto** ou **Escanear código de barras**. O scanner abre a câmera traseira e uma moldura guia o enquadramento. A primeira leitura válida trava novas leituras até a tela seguinte, evitando múltiplos produtos adicionados por um único apontamento.
 
-A documentação da GeckoAPI descreve tecnicamente uma extração do Mercado Livre, mas não foi encontrada autorização do Mercado Livre para coleta automatizada, cache, exibição ou estatísticas derivadas. Nenhuma busca ou importação de preços foi realizada. A fórmula futura de **70% média de preços primários + 30% média aparada do Mercado Livre** é apenas uma regra planejada e não é calculada nesta versão.
+O app valida EAN/GTIN com dígito verificador e procura primeiro pelo código exato no catálogo local. A câmera suporta códigos EAN/GTIN compatíveis; códigos que não passam na validação não entram no cache.
 
-| Fonte | Estado | Efeito no app |
-| --- | --- | --- |
-| Preço informado pela pessoa | Ativo | Identificado como manual; pode alimentar subtotais, comparação, histórico e notificações locais. Não é preço verificado pela loja. |
-| SuperLuna | Manual, sem integração automática | Loja/unidade cadastrável; nenhum preço real é importado automaticamente. |
-| Mercado Livre via GeckoAPI | Desativado | Nenhuma consulta, anúncio ou preço ativo; não entra na comparação entre supermercados. |
-| Outros supermercados | Manual, sem feed ativo | Lojas cadastráveis e preços digitados pela pessoa. |
+## 7. Pesquisa por nome
 
-Relatórios: [auditoria do SuperLuna](docs/superluna-audit.md), [auditoria GeckoAPI/Mercado Livre](docs/geckoapi-mercadolivre-audit.md) e [auditoria consolidada de fontes](docs/catalog-sources-audit.md).
+**Pesquisar produto** filtra os produtos já cadastrados neste aparelho. Não consulta um catálogo remoto nesta versão. Se o código escaneado não existir localmente, a pessoa pode pesquisar o nome entre seus produtos, cadastrar os dados manualmente ou tentar outro código.
 
-## Histórico e notificações
+## 8. Dados do produto
 
-Cada novo preço manual pode registrar a alteração no histórico local. Notificações são locais ao Android e dependem da permissão; podem avisar sobre mudanças/limites relacionados a preços que a própria pessoa registrou. Como não há feed externo ativo, o app não detecta promoções ou mudanças automáticas de preços de mercado.
+Quando um produto local é encontrado, a confirmação mostra o nome, a marca, a descrição, a categoria, o tamanho/unidade e o EAN disponíveis no próprio cadastro. Dados ausentes continuam ausentes: o app não completa nem inventa campos. A origem da informação é identificada quando disponível.
 
-## Dados e backup criptografado
+## 9. Confirmação antes de adicionar
 
-Listas, produtos, lojas, favoritos, preferências, preços e histórico permanecem no SQLite local. A API de backup está ativa no domínio de produção. O backup remoto é opcional, não cria conta e não sincroniza aparelhos; requer a versão do app cujo código inclui o cliente (1.1.0+) e consentimento explícito. Ainda não há APK 1.1.0 publicado.
+Antes de pesquisar preços e adicionar o produto, o app apresenta **“Encontramos este produto”** e pergunta **“É este produto?”**. A pessoa pode confirmar ou pedir nova leitura. Se não houver correspondência, aparece **“Não encontramos esse código de barras.”**, com ações para pesquisar no catálogo local por nome, adicionar manualmente ou tentar de novo.
 
-O fluxo do cliente Android é:
+## 10. Imagens e direitos de uso
 
-1. A pessoa autoriza o recurso nas Configurações.
-2. O Android gera uma chave de cifragem e um token de acesso aleatórios e independentes, guardados no SecureStore/Android Keystore.
-3. O snapshot é cifrado no Android com XChaCha20-Poly1305 e enviado por HTTPS. O MySQL guarda somente o envelope cifrado, o hash do token, a revisão e horários; o backend não consegue ler o conteúdo.
-4. Depois de ativado, alterações são enviadas com o app em uso e há uma tentativa ao abrir. Não há execução agendada ou sincronização em segundo plano.
+Nenhuma imagem fictícia é gerada para representar um produto real. Uma imagem só pode ser exibida quando há URL HTTPS, origem identificada e direitos de exibição confirmados para o fornecedor. Como as fontes de catálogo auditadas ainda não comprovaram esses direitos para o uso pretendido, não há busca automática de imagens ativa.
 
-**Limites importantes quando ativado:** não há recuperação da chave, transferência para outro aparelho ou histórico de versões. Perder a chave de cifragem torna o conteúdo irrecuperável. Perder o token impede que o app localize ou apague aquela cópia. Não há expiração automática; apague a cópia remota nas Configurações antes de desinstalar o app. Pausar o backup mantém a cópia; apagar a cópia remota não remove os dados locais. Falhas de rede não impedem o uso local.
+## 11. Identificação e tamanhos de embalagem
 
-Veja o [contrato de segurança do backup](docs/cloud-backup-security.md) para dados visíveis ao serviço, tamanho máximo, limites básicos de requisição e detalhes técnicos.
+O EAN/GTIN validado é a chave principal de busca local. O app também verifica nome, marca e embalagem antes de aceitar uma associação. Tamanhos incompatíveis, por exemplo arroz de 1 kg e arroz de 5 kg, permanecem separados; valores de kg/g e l/ml só são comparáveis após conversão de unidade equivalente. Para anúncios futuros, um resultado externo só poderá participar da média depois de passar pela validação estrita de código, nome, marca, tamanho e unidade. Kits, conjuntos e embalagens incompatíveis não devem ser mesclados.
 
-## Privacidade e autenticação
+## 12. Cache por código de barras
 
-- Não há cadastro, conta, e-mail ou senha do CompraFácil.
-- A localização em segundo plano não é usada.
-- A chave de cifragem e o token de backup não são embutidos no APK nem enviados em texto claro ao servidor; o token é transmitido apenas em cabeçalho HTTPS.
-- O SecureStore é excluído do Android Auto Backup. Reinstalar pode criar uma nova identidade de backup e deixar uma cópia antiga inacessível.
-- A busca opcional de lojas próximas depende de configuração do servidor. Sem ela, listas e comparações locais continuam disponíveis.
+O produto, o EAN, os dados de origem, os campos da imagem autorizada, a última consulta e o resumo de preços têm colunas próprias no SQLite. Ao ler um código já cadastrado, o app reutiliza imediatamente o registro local e verifica sua validade. Um cache vencido é sinalizado; como não existe provedor autorizado ativo, o app não tenta atualizar pela rede.
 
-## Instalação e desenvolvimento
+O cadastro manual local não expira por padrão. Uma futura fonte remota precisará definir e respeitar um TTL autorizado e limitado antes de ser habilitada.
 
-### Requisitos
+## 13. Busca de preços depois da confirmação
 
-- Node.js 22 ou compatível com a versão Expo fixada no projeto.
+Depois da confirmação do produto, `PriceSearchService` lê somente observações de preço manual salvas no aparelho para **aquele mesmo registro de produto**. Nenhuma chamada a supermercado, Mercado Livre, GeckoAPI ou catálogo de terceiros é realizada. Quando não há observação elegível, a tela informa **“Preço: não disponível”** e ainda permite adicionar o produto sem preço.
+
+## 14. Média, mínimo, máximo e quantidade de fontes
+
+Quando existem preços locais elegíveis para o produto, a tela informa a média, o menor e o maior valor, a quantidade de observações e a data/hora da consulta local. A tela separa os grupos de fonte: uma oferta de marketplace nunca é apresentada como supermercado.
+
+Se só houver preços primários, o resumo usa a média desse grupo. A regra futura já especificada de **70% da média primária + 30% da média aparada de marketplace** só pode ser aplicada quando ambos os grupos tiverem observações autorizadas e compatíveis. Como marketplace está desligado, a fórmula não produz hoje uma média com anúncios.
+
+## 15. Preço de supermercado e escolha da loja
+
+Preços manuais por loja/unidade aparecem separadamente, com a origem, a unidade cadastrada e a data/hora. A pessoa pode escolher um desses preços e a lista passa a usar aquela loja. Esses valores foram informados pela pessoa e **não foram verificados pelo supermercado**.
+
+## 16. Preço de referência quando nenhuma loja é escolhida
+
+Na ausência de uma loja escolhida para a lista, o app pode usar a média dos preços manuais locais compatíveis como **referência estimada**, sem atribuí-la a uma filial específica. Com uma loja selecionada, a observação manual daquela loja tem prioridade; a referência identificada pode preencher itens sem preço naquela unidade. A comparação entre supermercados continua usando apenas observações manuais associadas a cada loja.
+
+## 17. Quantidade e subtotal
+
+O subtotal do item é calculado automaticamente como **quantidade × preço disponível**. Por exemplo, 3 unidades de uma referência de R$ 24,40 correspondem a R$ 73,20. Se não houver preço elegível, o item continua na lista sem valor. Totais que misturam valores registrados e referências são identificados como parciais/estimados, não como cotação completa.
+
+## 18. Comparação entre supermercados
+
+A comparação soma somente preços manuais salvos para o produto e a unidade correspondentes em cada supermercado. Ela mostra a quantidade de itens com preço e sem preço. Uma referência média não é usada para afirmar que determinada filial vende aquele produto por esse valor; marketplace não entra em ranking ou recomendação de supermercado.
+
+## 19. Histórico de preços
+
+Ao registrar ou alterar um preço manual, o app pode guardar o valor anterior, o novo valor, a loja/unidade, a fonte manual e a data/hora no armazenamento local. O histórico não contém preços importados automaticamente.
+
+## 20. Notificações Android
+
+Notificações locais podem avisar sobre alteração ou limite associado a preço informado manualmente, desde que a permissão Android esteja concedida. Como não há feed automático ativo, o app não detecta promoções nem mudanças de mercado em segundo plano.
+
+## 21. Localização
+
+A localização é opcional e solicitada em primeiro plano somente após uma ação da pessoa. Não há rastreamento em segundo plano. Uma futura busca de lojas próximas pode enviar coordenadas à API configurada para aquela solicitação; a localização atual não é mantida como histórico de rastreamento.
+
+## 22. SuperLuna
+
+O SuperLuna permanece cadastrado como supermercado manual. Na auditoria pública anterior, o acesso normal ao site respondeu **HTTP 403 da CloudFront** e não foi confirmada API ou feed autorizado. O bloqueio não foi contornado, nenhum preço foi extraído e a integração automática continua desativada. Veja [auditoria do SuperLuna](docs/superluna-audit.md).
+
+## 23. Mercado Livre e GeckoAPI
+
+A integração via GeckoAPI permanece desligada. A disponibilidade técnica de uma API ou serviço de extração não comprova autorização para coleta, cache, exibição ou cálculo de estatísticas derivadas. Nenhuma consulta de anúncios foi executada; ofertas de marketplace não são apresentadas como preços de supermercado. Veja [auditoria GeckoAPI/Mercado Livre](docs/geckoapi-mercadolivre-audit.md).
+
+## 24. Fontes de catálogo de produtos
+
+A auditoria documental de GS1 Brasil, Barcode Lookup e EAN-Search não encontrou direitos suficientes e comprovados para habilitar consulta, cache, exibição de metadados/imagens e uso derivado no app. Os serviços exigem liberação, chave ou assinatura e/ou deixam os direitos de dados de terceiros indeterminados. Nenhuma conta/chave foi criada e nenhuma chamada de amostra foi feita. Veja [auditoria de fontes por código de barras](docs/barcode-product-source-audit.md).
+
+## 25. Permissões do Android
+
+- **Câmera:** solicitada somente ao tocar em **Escanear código de barras**. Se negada, o app explica como abrir as configurações; listas e cadastros manuais continuam disponíveis.
+- **Localização:** opcional, em primeiro plano.
+- **Notificações:** usadas somente para alertas locais, conforme permissão do sistema.
+- **Microfone:** não é necessário nem solicitado pelo scanner.
+
+## 26. Armazenamento local
+
+SQLite no dispositivo mantém listas, itens, produtos, códigos de barras, imagens autorizadas com sua origem, lojas, preços manuais, histórico, favoritos, preferências, cache e configurações. Os códigos de barras não são enviados a um catálogo remoto nesta versão. A comparação entre supermercados usa somente o banco local.
+
+## 27. Backup remoto criptografado
+
+O backup é opcional, sem login e sem sincronização entre aparelhos. A chave de cifragem e o token aleatórios são guardados no Android SecureStore/Keystore. O snapshot, incluindo os dados do produto, é cifrado no aparelho com XChaCha20-Poly1305 antes do envio por HTTPS. O MySQL guarda somente o envelope cifrado e metadados técnicos mínimos; o servidor não consegue ler as listas.
+
+Perder a chave torna o backup irrecuperável. Não há recuperação da chave, transferência para outro aparelho, histórico de versões ou expiração automática. Pausar mantém a cópia remota; apagar a cópia não remove os dados locais. Consulte o [contrato de segurança do backup](docs/cloud-backup-security.md).
+
+## 28. Privacidade e rede
+
+Não há autenticação nem solicitação de dados de conta. Scanner, pesquisa pelo nome e leitura de preços do catálogo local funcionam sem chamadas externas. Recursos de proximidade e backup opcional usam a rede apenas quando configurados/ativados. Segredos do servidor nunca devem estar em variáveis `EXPO_PUBLIC_*` nem no APK.
+
+## 29. Instalação e uso
+
+Use somente um APK anexado a uma Release validada do repositório. O Android pode pedir autorização para instalar arquivos do aplicativo pelo qual o APK foi baixado. O app mantém listas locais sem rede; a permissão da câmera só é necessária para leitura de código.
+
+## 30. Requisitos de desenvolvimento
+
+- Node.js 22 ou compatível com a versão Expo fixada.
 - `pnpm`.
-- Android Studio/emulador ou aparelho Android para executar o modo de desenvolvimento.
+- Android Studio/emulador ou aparelho Android para desenvolvimento/teste.
+- Não é necessário obter credenciais de catálogo para executar testes locais.
 
-### Preparar o ambiente
+## 31. Preparar o ambiente
 
 ```bash
 pnpm install --frozen-lockfile
 cp .env.example .env
 ```
 
-Para desenvolvimento, configure `EXPO_PUBLIC_API_BASE_URL` com um endereço de API alcançável pelo dispositivo Android. A URL é pública e não deve conter credenciais. Para a busca opcional de supermercados próximos, o servidor precisa de `MANUS_API_URL` e `MANUS_API_KEY`; mantenha `MANUS_API_KEY` exclusivamente no ambiente protegido do servidor, nunca em `EXPO_PUBLIC_*`, no APK ou no Git. `DATABASE_URL` também é segredo exclusivamente do servidor/ambiente gerenciado.
+Para desenvolvimento, configure `EXPO_PUBLIC_API_BASE_URL` apenas com uma origem pública sem segredos. Para busca opcional de lojas próximas, `MANUS_API_URL` e `MANUS_API_KEY` pertencem exclusivamente ao servidor. `DATABASE_URL` também é segredo de backend.
 
-**Não configure `GECKO_API_KEY` nem `GECKO_API_URL`:** a integração não está autorizada nem ativa, e o projeto não chama a GeckoAPI.
+## 32. Variáveis de provedores
 
-### Comandos
+**Não configure `GECKO_API_KEY`, `GECKO_API_URL` nem credenciais de catálogo** nesta versão. Não há fonte automática autorizada ativa. Nunca inclua chaves em código, `.env` público, log ou APK.
+
+## 33. Comandos de desenvolvimento
 
 ```bash
 pnpm check   # verificação TypeScript
@@ -108,29 +172,33 @@ pnpm dev     # API local + Metro
 pnpm android # desenvolvimento Android conectado/emulador
 ```
 
-O projeto Mobile gerenciado gera o APK oficial pela ação **Build Android APK** no Dashboard. Preview, Expo Go e `pnpm build` não são um APK instalável. Para este código, a versão configurada é **1.1.0**, `versionCode` 2, Android mínimo API 24 e arquiteturas `armeabi-v7a`/`arm64-v8a`; isso descreve a configuração-fonte, não confirma que um APK foi gerado.
+## 34. Build Android e versão
 
-## Tecnologias
+A configuração-fonte atual é **1.2.0**, `versionCode` **3**, Android mínimo API 24, arquiteturas `armeabi-v7a` e `arm64-v8a`. Essa informação descreve o código; só uma compilação Android concluída e verificada pode ser chamada de APK 1.2.0. `pnpm build`, Preview e Expo Go não produzem por si só um APK instalável.
 
-Expo, React Native, TypeScript, Expo Router, NativeWind, SQLite (`expo-sqlite`), Express, tRPC, Drizzle ORM, MySQL gerenciado, Expo SecureStore, Expo Crypto e `@noble/ciphers`.
+## 35. Arquitetura principal
 
-## Estrutura principal
+- `app/` — rotas e telas Android.
+- `components/barcode/BarcodeScanner.tsx` — leitor por câmera e controle de permissão/uma leitura.
+- `lib/barcode/` — `ProductLookup`, `ProductMatcher`, `ProductImageResolver`, `PriceSearchService`, `PriceAggregator`, `ProductCache` e contrato de autorização.
+- `lib/local-db.ts` — SQLite, código de barras, preços, histórico e snapshot de backup.
+- `lib/price-provider.ts` e `lib/marketplace-provider.ts` — gates de preços externos, fechados por padrão.
+- `lib/cloud-backup-client.ts`, `lib/cloud-backup-crypto.ts`, `lib/cloud-backup-snapshot.ts` — fluxo de backup cifrado.
+- `server/cloud-backup.ts` — armazenamento remoto de conteúdo cifrado.
+- `tests/` — testes unitários e de integração.
 
-- `app/` — telas Android e rotas.
-- `components/` — componentes visuais reutilizáveis.
-- `lib/local-db.ts` — SQLite local, listas, lojas, preços, histórico, exportação/restauração de snapshot.
-- `lib/domain.ts` — regras de moeda, comparação e recomendação.
-- `lib/cloud-backup-client.ts`, `lib/cloud-backup-crypto.ts`, `lib/cloud-backup-snapshot.ts` — fluxo Android de backup, cifra e validação.
-- `lib/price-provider.ts`, `lib/marketplace-provider.ts` — pontos de extensão com ativação fechada por padrão.
-- `server/cloud-backup.ts` — API de snapshot cifrado; token nunca é salvo em claro.
-- `server/` e `drizzle/` — API e schema/migrações do backend gerenciado.
-- `tests/` — testes automatizados.
-- `docs/` — auditorias de fontes de preços e documentação de segurança.
+## 36. Testes e validação
 
-## Contribuições futuras
+`pnpm check` verifica os tipos TypeScript; `pnpm test` executa os testes automatizados. Testes do scanner/catálogo cobrem dígito verificador, tamanhos equivalentes/incompatíveis, gates de autorização, cache local, ausência de fontes externas e a regra 70/30. Antes de publicar um APK, é necessário verificar também assinatura/estrutura, pacote Android, versão e correspondência com o commit de origem.
 
-Issues e pull requests podem propor melhorias, correções ou fontes de dados autorizadas. Toda nova integração de preços deve apresentar autorização verificável para coleta, armazenamento, exibição e uso derivado, respeitando termos e limites; não contorne 403, CAPTCHA ou autenticação. Não publique segredos, dados pessoais, preços fictícios como reais nem builds sem correspondência com a fonte. O repositório ainda não inclui um arquivo `CONTRIBUTING.md`; combine as mudanças e seus testes no pull request.
+## 37. Como propor uma fonte autorizada
 
-## Licença
+Uma integração futura precisa trazer evidência verificável que cubra consulta automatizada, armazenamento/cache, exibição de metadados e imagens, e uso derivado de preços; deve documentar limites, TTL, atribuição, escopo geográfico e credenciais. Não contorne 403, CAPTCHA, login, limite ou outro controle. A ativação requer revisão explícita; adicionar um endpoint técnico não é, por si só, autorização.
 
-Este repositório **não contém um arquivo `LICENSE`**. A publicação pública não concede, por si só, permissão para reutilizar, modificar ou redistribuir o código. Uma licença deverá ser escolhida pelo titular antes de conceder esses direitos.
+## 38. Contribuições
+
+Issues e pull requests podem propor correções e melhorias Android. Inclua motivação, testes, versão/configuração e fontes de dados autorizadas quando aplicável. Não publique credenciais, dados pessoais, imagens sem direitos ou preços fictícios como reais.
+
+## 39. Licença do repositório
+
+Este repositório **não contém arquivo `LICENSE`**. A publicação pública não concede por si só direito de reutilizar, modificar ou redistribuir o código. A licença precisa ser escolhida pelo titular antes de conceder esses direitos.

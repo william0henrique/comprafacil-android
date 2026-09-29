@@ -3,11 +3,12 @@ import Svg, { Circle, Line, Polyline } from "react-native-svg";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
 import { useCallback, useState } from "react";
-import { Dimensions, StyleSheet, Text, View } from "react-native";
+import { Dimensions, Image, StyleSheet, Text, View } from "react-native";
 import { AppScreen, Badge, C, Card, EmptyState, IconButton, PageHeading, SecondaryButton, textStyles } from "@/components/comprafacil-ui";
 import { formatBRL } from "@/lib/domain";
 import { getPriceHistory, getProduct, getProductPriceRows, toggleProductFavorite, type PriceHistoryItem, type Product } from "@/lib/local-db";
 import { MARKETPLACE_REFERENCE_DISABLED_MESSAGE } from "@/lib/marketplace-provider";
+import { resolveProductImage } from "@/lib/barcode/product-image-resolver";
 
 function dateLabel(value: string): string {
   const date = new Date(value);
@@ -53,10 +54,19 @@ export default function ProductDetailScreen() {
 
   if (!product) return <AppScreen><EmptyState icon="cube-outline" title="Produto não encontrado" body="Ele pode ter sido removido do armazenamento local." action={<SecondaryButton label="Voltar" onPress={() => router.back()} />} /></AppScreen>;
   const size = product.sizeValue != null && product.sizeUnit ? `${product.sizeValue} ${product.sizeUnit}` : "Tamanho não informado";
+  const productImage = resolveProductImage({ imageUrl: product.imageUrl, imageSource: product.imageSource, imageRightsVerified: product.imageRightsVerified });
   return (
     <AppScreen>
       <PageHeading title="Produto" subtitle="Detalhes e histórico local." action={<IconButton icon={product.isFavorite ? "heart" : "heart-outline"} label={product.isFavorite ? "Remover favorito" : "Favoritar"} tint={product.isFavorite ? C.coral : C.leaf} onPress={() => { void toggleProductFavorite(db, product.id).then(refresh); }} />} />
-      <Card style={styles.productCard}><View style={styles.productIcon}><Ionicons name="cube-outline" size={29} color={C.leaf} /></View><Text style={styles.productName}>{product.name}</Text><Text style={styles.productMeta}>{[product.brand, size, product.category].filter(Boolean).join(" · ")}</Text><Badge tone="neutral">Correspondência local por tamanho exato</Badge><Text style={textStyles.secondary}>Embalagens de tamanhos diferentes permanecem como produtos separados. Não foi aplicado preço unitário estimado.</Text></Card>
+      <Card style={styles.productCard}>{productImage ? <Image source={{ uri: productImage }} style={styles.productImage} resizeMode="contain" /> : <View style={styles.productIcon}><Ionicons name="cube-outline" size={29} color={C.leaf} /></View>}<Text style={styles.productName}>{product.name}</Text><Text style={styles.productMeta}>{[product.brand, size, product.category].filter(Boolean).join(" · ")}</Text><Badge tone="neutral">Identidade local com tamanho de embalagem</Badge><Text style={textStyles.secondary}>Embalagens de tamanhos diferentes permanecem como produtos separados. Não foi aplicado preço unitário estimado.</Text></Card>
+
+      <Card style={styles.catalogInfoCard}>
+        <Text style={styles.heading}>Código e origem dos dados</Text>
+        <Text style={textStyles.secondary}>EAN/GTIN: {product.barcode ?? "Não informado"}</Text>
+        <Text style={textStyles.secondary}>Cadastro: {product.metadataSource ?? "manual-local"}{product.lastLookupAt ? ` · consultado ${dateLabel(product.lastLookupAt)}` : ""}</Text>
+        {productImage ? <Text style={textStyles.secondary}>Imagem com direitos verificados · origem: {product.imageSource}</Text> : <Text style={textStyles.secondary}>Imagem não exibida: não há URL de imagem com direitos de uso confirmados.</Text>}
+        {product.referencePriceCents != null ? <View style={styles.referenceBox}><Text style={styles.heading}>Referência local</Text><Text style={styles.priceValue}>{formatBRL(product.referencePriceCents)}</Text><Text style={textStyles.secondary}>{product.priceSourceCount} {product.priceSourceCount === 1 ? "preço manual" : "preços manuais"} · atualizado {product.priceSearchedAt ? dateLabel(product.priceSearchedAt) : "sem data"}. Não é preço verificado por supermercado.</Text></View> : <Text style={textStyles.secondary}>Nenhum preço de referência local está disponível.</Text>}
+      </Card>
 
       <Card style={styles.marketplaceCard}><View style={styles.historyHead}><View style={{ flex: 1 }}><Text style={styles.heading}>Referência de marketplace</Text><Text style={textStyles.secondary}>Mercado Livre · consulta desativada</Text></View><Badge tone="neutral">Indisponível</Badge></View><Text style={textStyles.secondary}>{MARKETPLACE_REFERENCE_DISABLED_MESSAGE}</Text></Card>
 
@@ -76,6 +86,9 @@ export default function ProductDetailScreen() {
 
 const styles = StyleSheet.create({
   productCard: { alignItems: "center", paddingVertical: 22 },
+  catalogInfoCard: { gap: 9 },
+  productImage: { width: "100%", height: 150, borderRadius: 18, backgroundColor: C.paper },
+  referenceBox: { backgroundColor: C.paleGreen, borderRadius: 16, padding: 13, gap: 5 },
   marketplaceCard: { backgroundColor: C.paper, borderColor: C.border },
   productIcon: { width: 66, height: 66, borderRadius: 21, backgroundColor: C.paleGreen, alignItems: "center", justifyContent: "center" },
   productName: { color: C.leafDark, fontSize: 22, fontWeight: "900", textAlign: "center", marginTop: 4 },

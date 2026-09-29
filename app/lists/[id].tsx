@@ -1,12 +1,18 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
-import { useCallback, useMemo, useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { AppScreen, Badge, C, Card, EmptyState, Field, IconButton, PageHeading, PrimaryButton, SecondaryButton, textStyles } from "@/components/comprafacil-ui";
+import { BarcodeScanner } from "@/components/barcode/BarcodeScanner";
 import { formatBRL, isPriceStale, parseBRLToCents, type MeasurementUnit } from "@/lib/domain";
-import { addExistingProductToList, addProductToList, changeItemQuantity, getAlertPreferences, getList, getListItems, getProducts, getStores, saveManualPrice, selectListStore, toggleProductFavorite, type ListItem, type Product, type ShoppingList, type Store } from "@/lib/local-db";
+import { addExistingProductToList, addProductToList, changeItemQuantity, getAlertPreferences, getList, getListItems, getProduct, getProducts, getStores, saveManualPrice, selectListStore, toggleProductFavorite, type ListItem, type Product, type ShoppingList, type Store } from "@/lib/local-db";
 import { notifyManualPriceThreshold, notifyRecordedPriceChange } from "@/lib/notifications";
+import { aggregateProductPrices, type ProductPriceSummary } from "@/lib/barcode/price-aggregator";
+import { cachePriceSummary } from "@/lib/barcode/product-cache";
+import { lookupProductByBarcode, type ProductLookupResult } from "@/lib/barcode/product-lookup";
+import { resolveProductImage } from "@/lib/barcode/product-image-resolver";
+import { searchProductPrices } from "@/lib/barcode/price-search-service";
 
 const UNITS: MeasurementUnit[] = ["kg", "g", "l", "ml", "un"];
 
@@ -46,6 +52,16 @@ export default function ListDetailScreen() {
   const [priceInput, setPriceInput] = useState("");
   const [confirmRemoveItem, setConfirmRemoveItem] = useState<ListItem | null>(null);
   const [busy, setBusy] = useState(false);
+  const [scannerVisible, setScannerVisible] = useState(false);
+  const [lookupModal, setLookupModal] = useState(false);
+  const [lookupBusy, setLookupBusy] = useState(false);
+  const [lookupResult, setLookupResult] = useState<ProductLookupResult | null>(null);
+  const [manualBarcode, setManualBarcode] = useState("");
+  const [scanProduct, setScanProduct] = useState<Product | null>(null);
+  const [scanAddModal, setScanAddModal] = useState(false);
+  const [scanQuantity, setScanQuantity] = useState("1");
+  const [scanPriceSummary, setScanPriceSummary] = useState<ProductPriceSummary | null>(null);
+  const scannerReturnToProductForm = useRef(false);
 
   const refresh = useCallback(async () => {
     if (!listId) return;
@@ -57,6 +73,11 @@ export default function ListDetailScreen() {
   const missingCount = items.filter((item) => item.priceCents == null).length;
   const pricedCount = items.length - missingCount;
   const totalCents = items.reduce((sum, item) => sum + (item.priceCents == null ? 0 : Math.round(item.priceCents * item.quantity)), 0);
+  const referenceCount = items.filter((item) => item.source === "derived_reference").length;
+  const foundProduct = lookupResult?.status === "found" ? lookupResult.product : null;
+  const foundProductImage = foundProduct ? resolveProductImage({ imageUrl: foundProduct.imageUrl, imageSource: foundProduct.imageSource, imageRightsVerified: foundProduct.imageRightsVerified }) : null;
+  const scanStoreOffers = scanPriceSummary?.offers.filter((offer) => offer.sourceGroup === "primary" && offer.storeId) ?? [];
+  const scanMarketplaceOffers = scanPriceSummary?.offers.filter((offer) => offer.sourceGroup === "marketplace") ?? [];
 
   const filteredCatalogProducts = useMemo(() => {
     const needle = productSearch.trim().toLocaleLowerCase("pt-BR");
@@ -72,12 +93,13 @@ export default function ListDetailScreen() {
     try {
       await addProductToList(db, listId, {
         name: productName.trim(), brand: brand.trim(), sizeValue: packageSize,
-        sizeUnit: packageSize ? sizeUnit : null, category: category.trim(), quantity: qty,
+        sizeUnit: packageSize ? sizeUnit : null, category: category.trim(), barcode: manualBarcode.trim() || null,
+        metadataSource: manualBarcode.trim() ? "manual-local" : null, quantity: qty,
       });
-      setProductModal(false); setProductName(""); setBrand(""); setSize(""); setCategory(""); setQuantity("1"); setSizeUnit("un");
+      setProductModal(false); setProductName(""); setBrand(""); setSize(""); setCategory(""); setManualBarcode(""); setQuantity("1"); setSizeUnit("un");
       await refresh();
-    } catch {
-      Alert.alert("Não foi possível adicionar", "Confira o nome, o tamanho e a quantidade.");
+    } catch (error) {
+      Alert.alert("Não foi possível adicionar", error instanceof Error ? error.message : "Confira o nome, o tamanho e a quantidade.");
     } finally { setBusy(false); }
   }
 
@@ -86,10 +108,106 @@ export default function ListDetailScreen() {
       setCatalogProducts(await getProducts(db));
       setProductSearch("");
       setProductModal(false);
+      setLookupModal(false);
       setProductPickerModal(true);
     } catch {
       Alert.alert("Meus produtos indisponíveis", "Não foi possível ler o catálogo local deste aparelho.");
     }
+  }
+
+  function beginBarcodeScan(fromProductForm = false) {
+    scannerReturnToProductForm.current = fromProductForm;
+    setProductModal(false);
+    setScannerVisible(true);
+  }
+
+  function cancelBarcodeScan() {
+    setScannerVisible(false);
+    if (scannerReturnToProductForm.current) setProductModal(true);
+    scannerReturnToProductForm.current = false;
+  }
+
+  async function handleBarcodeDetected(rawCode: string) {
+    setScannerVisible(false);
+    scannerReturnToProductForm.current = false;
+    setLookupBusy(true);
+    try {
+      const result = await lookupProductByBarcode(db, rawCode);
+      if (result.status === "invalid-code") {
+        Alert.alert("Código de barras inválido", "Não foi possível validar o EAN/GTIN lido.", [
+          { text: "Tentar novamente", onPress: () => beginBarcodeScan(false) },
+          { text: "Adicionar manualmente", onPress: () => { setManualBarcode(""); setProductModal(true); } },
+        ]);
+        return;
+      }
+      setLookupResult(result);
+      setLookupModal(true);
+    } catch {
+      Alert.alert("Busca local indisponível", "Não foi possível consultar o catálogo deste aparelho. Você ainda pode pesquisar produtos ou cadastrá-los manualmente.");
+    } finally {
+      setLookupBusy(false);
+    }
+  }
+
+  function addNotFoundManually() {
+    const barcode = lookupResult?.status === "not-found" ? lookupResult.barcode : "";
+    setManualBarcode(barcode);
+    setLookupModal(false);
+    setProductModal(true);
+  }
+
+  async function confirmScannedProduct() {
+    if (lookupResult?.status !== "found" || lookupBusy) return;
+    setLookupBusy(true);
+    setScanQuantity("1");
+    try {
+      const search = await searchProductPrices(db, lookupResult.product);
+      const summary = aggregateProductPrices({
+        id: lookupResult.product.id,
+        barcode: lookupResult.product.barcode,
+        name: lookupResult.product.name,
+        brand: lookupResult.product.brand,
+        sizeValue: lookupResult.product.sizeValue,
+        sizeUnit: lookupResult.product.sizeUnit,
+      }, search.offers, search.searchedAt);
+      await cachePriceSummary(db, lookupResult.product.id, summary);
+      setScanProduct(await getProduct(db, lookupResult.product.id) ?? lookupResult.product);
+      setScanPriceSummary(summary);
+      setLookupModal(false);
+      setScanAddModal(true);
+    } catch {
+      const summary = aggregateProductPrices({
+        id: lookupResult.product.id,
+        barcode: lookupResult.product.barcode,
+        name: lookupResult.product.name,
+        brand: lookupResult.product.brand,
+        sizeValue: lookupResult.product.sizeValue,
+        sizeUnit: lookupResult.product.sizeUnit,
+      }, [], new Date().toISOString());
+      setScanProduct(lookupResult.product);
+      setScanPriceSummary(summary);
+      setLookupModal(false);
+      setScanAddModal(true);
+    } finally {
+      setLookupBusy(false);
+    }
+  }
+
+  async function addScannedProduct(storeId: string | null = null) {
+    if (!scanProduct || busy) return;
+    const qty = parsePositiveNumber(scanQuantity);
+    if (!qty) { Alert.alert("Quantidade inválida", "Informe uma quantidade maior que zero."); return; }
+    setBusy(true);
+    try {
+      if (storeId) await selectListStore(db, listId, storeId);
+      const added = await addExistingProductToList(db, listId, scanProduct.id, qty);
+      if (!added) throw new Error("O produto não existe mais no catálogo local.");
+      setScanAddModal(false);
+      setScanProduct(null);
+      await refresh();
+    } catch (error) {
+      Alert.alert("Não foi possível adicionar", error instanceof Error ? error.message : "Tente novamente.");
+    } finally { setBusy(false); }
   }
 
   async function addExistingProduct(product: Product) {
@@ -171,8 +289,8 @@ export default function ListDetailScreen() {
     <AppScreen>
       <PageHeading title={list.name} subtitle="Lista salva apenas neste aparelho." action={<IconButton icon="storefront-outline" label="Selecionar supermercado" onPress={() => setStoreModal(true)} />} />
       <Card style={styles.storeSummary}>
-        <View style={styles.storeSummaryRow}><View style={styles.storeMark}><Ionicons name="storefront-outline" size={20} color={C.leaf} /></View><View style={{ flex: 1 }}><Text style={styles.storeName}>{selectedStore ? `${selectedStore.chainName}${selectedStore.branchName ? ` — ${selectedStore.branchName}` : ""}` : "Nenhum supermercado selecionado"}</Text><Text style={textStyles.secondary}>{selectedStore ? "O subtotal usa apenas valores registrados para esta loja." : "Selecione uma loja para ver subtotal e preços por produto."}</Text></View><Pressable onPress={() => setStoreModal(true)}><Text style={styles.link}>{selectedStore ? "Trocar" : "Escolher"}</Text></Pressable></View>
-        <View style={styles.totalRow}><View><Text style={styles.totalCaption}>Subtotal registrado</Text><Text style={styles.totalValue}>{formatBRL(pricedCount ? totalCents : null)}</Text></View><View style={{ alignItems: "flex-end", gap: 4 }}><Badge tone={missingCount ? "amber" : "green"}>{missingCount} sem preço</Badge><Text style={styles.pricedCount}>{pricedCount} de {items.length} com preço</Text></View></View>
+        <View style={styles.storeSummaryRow}><View style={styles.storeMark}><Ionicons name="storefront-outline" size={20} color={C.leaf} /></View><View style={{ flex: 1 }}><Text style={styles.storeName}>{selectedStore ? `${selectedStore.chainName}${selectedStore.branchName ? ` — ${selectedStore.branchName}` : ""}` : "Nenhum supermercado selecionado"}</Text><Text style={textStyles.secondary}>{selectedStore ? "Usa o preço manual desta loja quando existe; outros itens podem usar uma referência identificada." : "Sem loja escolhida, usa a média dos preços manuais disponíveis; isso não é uma cotação de supermercado."}</Text></View><Pressable onPress={() => setStoreModal(true)}><Text style={styles.link}>{selectedStore ? "Trocar" : "Escolher"}</Text></Pressable></View>
+        <View style={styles.totalRow}><View><Text style={styles.totalCaption}>{referenceCount ? "Subtotal parcial estimado" : "Subtotal parcial"}</Text><Text style={styles.totalValue}>{formatBRL(pricedCount ? totalCents : null)}</Text></View><View style={{ alignItems: "flex-end", gap: 4 }}><Badge tone={missingCount ? "amber" : "green"}>{missingCount} sem preço</Badge><Text style={styles.pricedCount}>{pricedCount} de {items.length} com preço</Text></View></View>
       </Card>
       <View style={styles.actionsRow}><PrimaryButton label="Adicionar produto" icon="add" onPress={() => setProductModal(true)} style={{ flex: 1 }} /><SecondaryButton label="Comparar" icon="git-compare-outline" onPress={() => router.push({ pathname: "/lists/[id]/compare", params: { id: listId } })} /></View>
 
@@ -196,7 +314,7 @@ export default function ListDetailScreen() {
               <Pressable accessibilityRole="button" accessibilityLabel="Aumentar quantidade" style={styles.stepper} onPress={() => { void changeItemQuantity(db, listId, item.id, 1).then(refresh); }}><Ionicons name="add" size={19} color={C.leaf} /></Pressable>
             </View>
             <View style={{ alignItems: "flex-end", flex: 1 }}>
-              {item.priceCents != null ? <><Text style={styles.itemPrice}>{formatBRL(item.priceCents)}{item.quantity !== 1 ? ` · ${formatBRL(Math.round(item.priceCents * item.quantity))}` : ""}</Text><Text style={styles.source}>{item.sourceLabel ?? "Fonte não informada"} · {dateLabel(item.observedAt)}</Text></> : <Text style={styles.noPrice}>{selectedStore ? "Preço não registrado nesta loja" : "Selecione uma loja para ver preço"}</Text>}
+              {item.priceCents != null ? <><Text style={styles.itemPrice}>{formatBRL(item.priceCents)}{item.quantity !== 1 ? ` · ${formatBRL(Math.round(item.priceCents * item.quantity))}` : ""}</Text><Text style={styles.source}>{item.sourceLabel ?? "Fonte não informada"} · {dateLabel(item.observedAt)}</Text></> : <Text style={styles.noPrice}>Preço não disponível: nenhuma fonte compatível</Text>}
               {stale ? <Badge tone="amber">Atualização antiga</Badge> : null}
             </View>
           </View>
@@ -211,7 +329,7 @@ export default function ListDetailScreen() {
       </Modal>
 
       <Modal transparent visible={storeModal} animationType="slide" onRequestClose={() => setStoreModal(false)}>
-        <View style={styles.modalBackdrop}><Pressable style={StyleSheet.absoluteFill} onPress={() => setStoreModal(false)} /><View style={styles.sheet}><View style={styles.sheetHandle} /><Text style={styles.sheetTitle}>Supermercado da lista</Text><Text style={textStyles.secondary}>O total inclui somente preços registrados para a loja escolhida.</Text><SecondaryButton label="Sem supermercado selecionado" icon="close-circle-outline" onPress={() => { void selectListStore(db, listId, null).then(() => { setStoreModal(false); return refresh(); }); }} />{stores.map((store) => <Pressable key={store.id} style={styles.storeOption} onPress={() => { void selectListStore(db, listId, store.id).then(() => { setStoreModal(false); return refresh(); }); }}><View style={styles.storeMark}><Ionicons name="storefront-outline" size={19} color={C.leaf} /></View><View style={{ flex: 1 }}><Text style={styles.storeName}>{store.chainName}{store.branchName ? ` — ${store.branchName}` : ""}</Text><Text style={textStyles.secondary}>{store.address ?? (store.chainId === "superluna-public-index" ? "Endereço não confirmado" : "Sem endereço")}</Text></View>{list.selectedStoreId === store.id ? <Ionicons name="checkmark-circle" size={22} color={C.leaf} /> : null}</Pressable>)}</View></View>
+        <View style={styles.modalBackdrop}><Pressable style={StyleSheet.absoluteFill} onPress={() => setStoreModal(false)} /><View style={styles.sheet}><View style={styles.sheetHandle} /><Text style={styles.sheetTitle}>Supermercado da lista</Text><Text style={textStyles.secondary}>O preço manual desta loja tem prioridade; quando faltar, um preço de referência aparece identificado e não é atribuído à filial.</Text><SecondaryButton label="Sem supermercado selecionado" icon="close-circle-outline" onPress={() => { void selectListStore(db, listId, null).then(() => { setStoreModal(false); return refresh(); }); }} />{stores.map((store) => <Pressable key={store.id} style={styles.storeOption} onPress={() => { void selectListStore(db, listId, store.id).then(() => { setStoreModal(false); return refresh(); }); }}><View style={styles.storeMark}><Ionicons name="storefront-outline" size={19} color={C.leaf} /></View><View style={{ flex: 1 }}><Text style={styles.storeName}>{store.chainName}{store.branchName ? ` — ${store.branchName}` : ""}</Text><Text style={textStyles.secondary}>{store.address ?? (store.chainId === "superluna-public-index" ? "Endereço não confirmado" : "Sem endereço")}</Text></View>{list.selectedStoreId === store.id ? <Ionicons name="checkmark-circle" size={22} color={C.leaf} /> : null}</Pressable>)}</View></View>
       </Modal>
 
       <Modal transparent visible={productModal} animationType="slide" onRequestClose={() => setProductModal(false)}>
@@ -219,19 +337,23 @@ export default function ListDetailScreen() {
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setProductModal(false)} />
           <View style={styles.sheet}>
             <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>Adicionar produto</Text>
-            <Text style={textStyles.secondary}>Tamanho e unidade evitam confundir, por exemplo, arroz de 1 kg com 5 kg. Produtos sem tamanho não são unidos automaticamente.</Text>
-            <SecondaryButton label="Escolher produto já cadastrado" icon="search-outline" onPress={() => { void openProductPicker(); }} />
-            <Field label="Produto" value={productName} onChangeText={setProductName} placeholder="Ex.: Arroz branco" autoCapitalize="sentences" />
-            <Field label="Marca (opcional)" value={brand} onChangeText={setBrand} placeholder="Ex.: Marca" />
-            <View style={styles.sizeRow}>
-              <View style={{ flex: 1 }}><Field label="Tamanho (opcional)" value={size} onChangeText={setSize} placeholder="Ex.: 1" keyboardType="decimal-pad" /></View>
-              <View style={{ flex: 1, gap: 7 }}><Text style={styles.fieldLabel}>Unidade</Text><View style={styles.unitRow}>{UNITS.map((unit) => <Pressable key={unit} onPress={() => setSizeUnit(unit)} style={[styles.unitChip, sizeUnit === unit && styles.unitChipSelected]}><Text style={[styles.unitText, sizeUnit === unit && { color: C.paper }]}>{unit}</Text></Pressable>)}</View></View>
-            </View>
-            <Field label="Categoria (opcional)" value={category} onChangeText={setCategory} placeholder="Ex.: Mercearia" />
-            <Field label="Quantidade" value={quantity} onChangeText={setQuantity} keyboardType="decimal-pad" placeholder="1" helper="Você pode usar quantidades fracionárias, como 0,5." />
-            <PrimaryButton label={busy ? "Salvando…" : "Adicionar à lista"} icon="add" disabled={!productName.trim() || !parsePositiveNumber(quantity) || Boolean(size.trim() && !parsePositiveNumber(size)) || busy} onPress={() => { void addProduct(); }} />
-            <SecondaryButton label="Cancelar" onPress={() => setProductModal(false)} />
+            <ScrollView style={styles.productFormScroll} contentContainerStyle={styles.productFormContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <Text style={styles.sheetTitle}>Adicionar produto</Text>
+              <Text style={textStyles.secondary}>Tamanho e unidade evitam confundir, por exemplo, arroz de 1 kg com 5 kg. O catálogo externo não tem fonte autorizada ativa; pesquisa por nome usa seus produtos locais.</Text>
+              <PrimaryButton label="Pesquisar produto" icon="search-outline" onPress={() => { void openProductPicker(); }} />
+              <SecondaryButton label="Escanear código de barras" icon="barcode-outline" onPress={() => beginBarcodeScan(true)} />
+              <Field label="Produto" value={productName} onChangeText={setProductName} placeholder="Ex.: Arroz branco" autoCapitalize="sentences" />
+              <Field label="Marca (opcional)" value={brand} onChangeText={setBrand} placeholder="Ex.: Marca" />
+              <View style={styles.sizeRow}>
+                <View style={{ flex: 1 }}><Field label="Tamanho (opcional)" value={size} onChangeText={setSize} placeholder="Ex.: 1" keyboardType="decimal-pad" /></View>
+                <View style={{ flex: 1, gap: 7 }}><Text style={styles.fieldLabel}>Unidade</Text><View style={styles.unitRow}>{UNITS.map((unit) => <Pressable key={unit} onPress={() => setSizeUnit(unit)} style={[styles.unitChip, sizeUnit === unit && styles.unitChipSelected]}><Text style={[styles.unitText, sizeUnit === unit && { color: C.paper }]}>{unit}</Text></Pressable>)}</View></View>
+              </View>
+              <Field label="Categoria (opcional)" value={category} onChangeText={setCategory} placeholder="Ex.: Mercearia" />
+              <Field label="EAN/código de barras (opcional)" value={manualBarcode} onChangeText={setManualBarcode} placeholder="8, 12, 13 ou 14 dígitos" keyboardType="numeric" maxLength={14} autoCapitalize="none" helper="O código é validado; produtos com EAN diferente não são unidos." />
+              <Field label="Quantidade" value={quantity} onChangeText={setQuantity} keyboardType="decimal-pad" placeholder="1" helper="Você pode usar quantidades fracionárias, como 0,5." />
+              <PrimaryButton label={busy ? "Salvando…" : "Adicionar à lista"} icon="add" disabled={!productName.trim() || !parsePositiveNumber(quantity) || Boolean(size.trim() && !parsePositiveNumber(size)) || busy} onPress={() => { void addProduct(); }} />
+              <SecondaryButton label="Cancelar" onPress={() => setProductModal(false)} />
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -263,6 +385,73 @@ export default function ListDetailScreen() {
       <Modal transparent visible={priceModal} animationType="slide" onRequestClose={() => setPriceModal(false)}>
         <View style={styles.modalBackdrop}><Pressable style={StyleSheet.absoluteFill} onPress={() => setPriceModal(false)} /><View style={styles.sheet}><View style={styles.sheetHandle} /><Text style={styles.sheetTitle}>Registrar preço manual</Text><Text style={textStyles.secondary}>{priceProduct?.productName}. O registro é informado por você; não é uma cotação verificada pelo supermercado.</Text><Text style={styles.fieldLabel}>Supermercado/unidade</Text><View style={styles.storePicker}>{stores.map((store) => <Pressable key={store.id} onPress={() => setPriceStoreId(store.id)} style={[styles.storeChip, priceStoreId === store.id && styles.storeChipSelected]}><Text style={[styles.storeChipText, priceStoreId === store.id && { color: C.paper }]}>{store.chainName}{store.branchName ? ` — ${store.branchName}` : ""}</Text></Pressable>)}</View><Field label="Preço por embalagem (R$)" value={priceInput} onChangeText={setPriceInput} placeholder="12,90" keyboardType="decimal-pad" helper="O tamanho do produto fica associado a este registro." /><PrimaryButton label={busy ? "Salvando…" : "Salvar preço e histórico"} icon="checkmark" disabled={!priceStoreId || parseBRLToCents(priceInput) == null || busy} onPress={() => { void savePrice(); }} /><SecondaryButton label="Cancelar" onPress={() => setPriceModal(false)} /></View></View>
       </Modal>
+
+      <BarcodeScanner visible={scannerVisible} onCancel={cancelBarcodeScan} onDetected={(code) => { void handleBarcodeDetected(code); }} />
+
+      <Modal transparent visible={lookupModal} animationType="fade" onRequestClose={() => setLookupModal(false)}>
+        <View style={styles.confirmBackdrop}>
+          <View style={styles.confirmCard}>
+            {foundProduct ? <ScrollView style={styles.confirmScroll} contentContainerStyle={styles.confirmContent} keyboardShouldPersistTaps="handled">
+              <Text style={styles.sheetTitle}>Encontramos este produto</Text>
+              {foundProductImage ? <Image source={{ uri: foundProductImage }} style={styles.productImage} resizeMode="contain" /> : <View style={styles.noProductImage}><Ionicons name="image-outline" size={25} color={C.muted} /><Text style={textStyles.secondary}>Imagem não disponível em fonte com direitos confirmados.</Text></View>}
+              <Text style={styles.productName}>{foundProduct.name}</Text>
+              <Text style={textStyles.secondary}>{[foundProduct.brand, foundProduct.sizeValue != null && foundProduct.sizeUnit ? `${foundProduct.sizeValue} ${foundProduct.sizeUnit}` : "Tamanho não informado", foundProduct.category].filter(Boolean).join(" · ")}</Text>
+              {foundProduct.description ? <Text style={textStyles.secondary}>{foundProduct.description}</Text> : null}
+              {foundProductImage ? <Text style={textStyles.secondary}>Origem da imagem: {foundProduct.imageSource ?? "direitos de exibição confirmados; URL de origem indisponível"}</Text> : null}
+              <Text style={styles.fieldLabel}>EAN: {foundProduct.barcode ?? "Não informado"}</Text>
+              <Badge tone="neutral">{lookupResult?.status === "found" ? lookupResult.sourceLabel : "Catálogo local"}</Badge>
+              <Text style={textStyles.secondary}>{foundProduct.metadataSource === "manual-local" ? "Informação cadastrada manualmente neste aparelho." : foundProduct.metadataSource ?? "A origem externa não está disponível."}</Text>
+              {lookupResult?.status === "found" && !lookupResult.cacheFresh ? <Badge tone="amber">Cache expirado; sem fonte autorizada ativa para atualizar.</Badge> : null}
+              <Text style={textStyles.secondary}>É este produto? Depois da confirmação, serão consultados somente os preços reais salvos neste aparelho.</Text>
+              <PrimaryButton label={lookupBusy ? "Consultando preços…" : "Sim, adicionar"} icon="checkmark" disabled={lookupBusy} onPress={() => { void confirmScannedProduct(); }} />
+              <SecondaryButton label="Não, pesquisar novamente" icon="scan-outline" onPress={() => { setLookupModal(false); setLookupResult(null); beginBarcodeScan(false); }} />
+            </ScrollView> : lookupResult?.status === "not-found" ? <View style={styles.confirmContent}>
+              <Text style={styles.sheetTitle}>Não encontramos esse código de barras.</Text>
+              <Text style={textStyles.secondary}>EAN: {lookupResult.barcode}. O catálogo local não contém esse produto e nenhuma fonte externa de metadados está autorizada/ativa nesta versão. Nenhum produto, imagem ou preço será inventado.</Text>
+              <PrimaryButton label="Pesquisar pelo nome" icon="search-outline" onPress={() => { void openProductPicker(); }} />
+              <SecondaryButton label="Adicionar produto manualmente" icon="create-outline" onPress={addNotFoundManually} />
+              <SecondaryButton label="Tentar novamente" icon="scan-outline" onPress={() => { setLookupModal(false); setLookupResult(null); beginBarcodeScan(false); }} />
+            </View> : <View style={styles.confirmContent}><Text style={styles.sheetTitle}>Busca de produto</Text><Text style={textStyles.secondary}>{lookupBusy ? "Consultando o catálogo local…" : "Nenhum resultado local disponível."}</Text><SecondaryButton label="Pesquisar pelo nome" icon="search-outline" onPress={() => { void openProductPicker(); }} /><SecondaryButton label="Adicionar manualmente" icon="create-outline" onPress={addNotFoundManually} /><SecondaryButton label="Fechar" onPress={() => setLookupModal(false)} /></View>}
+          </View>
+        </View>
+      </Modal>
+
+      <Modal transparent visible={scanAddModal} animationType="slide" onRequestClose={() => setScanAddModal(false)}>
+        <View style={styles.modalBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setScanAddModal(false)} />
+          <View style={styles.sheet}>
+            <View style={styles.sheetHandle} />
+            <ScrollView style={styles.productFormScroll} contentContainerStyle={styles.productFormContent} keyboardShouldPersistTaps="handled">
+              <Text style={styles.sheetTitle}>Adicionar à lista</Text>
+              {scanProduct ? <>
+                <Text style={styles.productName}>{scanProduct.name}</Text>
+                <Text style={textStyles.secondary}>{[scanProduct.brand, scanProduct.sizeValue != null && scanProduct.sizeUnit ? `${scanProduct.sizeValue} ${scanProduct.sizeUnit}` : "Tamanho não informado", scanProduct.barcode ? `EAN ${scanProduct.barcode}` : null].filter(Boolean).join(" · ")}</Text>
+              </> : null}
+              {scanPriceSummary?.sourceCount ? <>
+                <Card style={styles.scanPriceCard}>
+                  <Text style={styles.scanPriceHeading}>Resumo de preços compatíveis</Text>
+                  <Text style={textStyles.secondary}>Média encontrada: {formatBRL(scanPriceSummary.averagePriceCents)} · menor: {formatBRL(scanPriceSummary.lowestPriceCents)} · maior: {formatBRL(scanPriceSummary.highestPriceCents)}</Text>
+                  <Text style={styles.scanReference}>Preço de referência: {formatBRL(scanPriceSummary.referencePriceCents)}</Text>
+                  <Text style={textStyles.secondary}>{scanPriceSummary.sourceCount} {scanPriceSummary.sourceCount === 1 ? "preço encontrado" : "preços encontrados"} · consultado {dateLabel(scanPriceSummary.searchedAt)}</Text>
+                  <Text style={textStyles.secondary}>Preços manuais salvos localmente. Nenhuma fonte automática autorizada está ativa.</Text>
+                </Card>
+                {scanStoreOffers.length ? <View style={{ gap: 7 }}><Text style={styles.fieldLabel}>Supermercados (preços manuais confirmáveis)</Text>{scanStoreOffers.map((offer, index) => <Pressable key={`${offer.productId}-${offer.storeId}-${index}`} style={styles.storeOfferRow} onPress={() => { if (offer.storeId) void addScannedProduct(offer.storeId); }}><View style={{ flex: 1 }}><Text style={styles.storeName}>{offer.storeName ?? "Supermercado"}</Text><Text style={textStyles.secondary}>Informado manualmente · {dateLabel(offer.observedAt)}</Text></View><Text style={styles.priceValue}>{formatBRL(offer.priceCents)}</Text><Ionicons name="chevron-forward" size={18} color={C.leaf} /></Pressable>)}</View> : null}
+                {scanMarketplaceOffers.length ? <View style={styles.marketplaceNote}><Text style={styles.scanPriceHeading}>Mercado Livre · marketplace, não supermercado</Text>{scanMarketplaceOffers.map((offer, index) => <Text key={`${offer.productId}-market-${index}`} style={textStyles.secondary}>{offer.sourceLabel}: {formatBRL(offer.priceCents)}</Text>)}</View> : null}
+              </> : <Card style={styles.scanPriceCard}><Text style={styles.scanPriceHeading}>Preço: não disponível</Text><Text style={textStyles.secondary}>Não há preço compatível para este produto nas fontes locais. Você pode adicioná-lo mesmo assim, sem valor fictício.</Text><Text style={textStyles.secondary}>Consulta {scanPriceSummary ? dateLabel(scanPriceSummary.searchedAt) : "local"}; nenhuma fonte automática autorizada está ativa.</Text></Card>}
+              {scanPriceSummary?.sourceCount ? <Text style={textStyles.secondary}>Se não escolher uma loja acima, a referência média será usada somente como estimativa; ela não representa uma cotação de supermercado.</Text> : null}
+              <View style={styles.quantityControl}>
+                <Pressable accessibilityRole="button" accessibilityLabel="Diminuir quantidade" style={styles.stepper} onPress={() => setScanQuantity((value) => String(Math.max(1, (parsePositiveNumber(value) ?? 1) - 1)))}><Ionicons name="remove" size={19} color={C.leaf} /></Pressable>
+                <Text style={styles.quantity}>{scanQuantity.replace(".", ",")}</Text>
+                <Pressable accessibilityRole="button" accessibilityLabel="Aumentar quantidade" style={styles.stepper} onPress={() => setScanQuantity((value) => String((parsePositiveNumber(value) ?? 1) + 1))}><Ionicons name="add" size={19} color={C.leaf} /></Pressable>
+              </View>
+              <Field label="Quantidade" value={scanQuantity} onChangeText={setScanQuantity} keyboardType="decimal-pad" helper="Subtotal é calculado automaticamente: quantidade × preço disponível." />
+              <Text style={styles.scanReference}>{scanPriceSummary?.referencePriceCents != null ? `Subtotal de referência: ${formatBRL(Math.round(scanPriceSummary.referencePriceCents * (parsePositiveNumber(scanQuantity) ?? 1)))}.` : "Sem preço elegível, o item será adicionado sem subtotal."}</Text>
+              <PrimaryButton label={busy ? "Adicionando…" : scanPriceSummary?.referencePriceCents != null ? "Usar referência e adicionar" : "Adicionar sem preço"} icon="add" disabled={!scanProduct || !parsePositiveNumber(scanQuantity) || busy} onPress={() => { void addScannedProduct(null); }} />
+              <SecondaryButton label="Cancelar" onPress={() => setScanAddModal(false)} />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </AppScreen>
   );
 }
@@ -293,7 +482,19 @@ const styles = StyleSheet.create({
   sheetHandle: { width: 42, height: 5, borderRadius: 5, backgroundColor: "#C7C9BD", alignSelf: "center", marginBottom: 3 },
   sheetTitle: { color: C.leafDark, fontSize: 21, fontWeight: "800" },
   confirmBackdrop: { flex: 1, justifyContent: "center", padding: 24, backgroundColor: "rgba(24,48,39,0.35)" },
-  confirmCard: { backgroundColor: C.cream, padding: 22, borderRadius: 22, gap: 13 },
+  confirmCard: { backgroundColor: C.cream, padding: 22, borderRadius: 22, gap: 13, maxHeight: "90%" },
+  confirmScroll: { flexShrink: 1 },
+  confirmContent: { gap: 12 },
+  productFormScroll: { flexShrink: 1 },
+  productFormContent: { gap: 13, paddingBottom: 10 },
+  productImage: { width: "100%", height: 128, borderRadius: 18, backgroundColor: C.paper },
+  noProductImage: { minHeight: 86, alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: C.paper, borderRadius: 18, padding: 14 },
+  scanPriceCard: { gap: 7, backgroundColor: C.paper },
+  scanPriceHeading: { color: C.leafDark, fontSize: 15, fontWeight: "800" },
+  scanReference: { color: C.leafDark, fontSize: 13, fontWeight: "800" },
+  priceValue: { color: C.leafDark, fontSize: 15, fontWeight: "900" },
+  storeOfferRow: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: 9, backgroundColor: C.paper, borderRadius: 15, paddingVertical: 10, paddingHorizontal: 12 },
+  marketplaceNote: { gap: 6, backgroundColor: C.paleAmber, borderRadius: 16, padding: 12 },
   storeOption: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.border, paddingVertical: 7 },
   sizeRow: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
   fieldLabel: { color: C.leafDark, fontSize: 13, fontWeight: "700" },
