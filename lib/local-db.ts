@@ -10,6 +10,7 @@ import {
   type MeasurementUnit,
   type StorePrice,
 } from "./domain";
+import { parseCloudBackupSnapshot, type CloudBackupSnapshot } from "./cloud-backup-snapshot";
 
 export type ShoppingList = {
   id: string;
@@ -657,4 +658,111 @@ export function buildStoreName(store: Pick<Store, "chainName" | "branchName">): 
 
 export function isSuperLunaStore(store: Pick<Store, "chainId" | "chainName">): boolean {
   return store.chainId === "superluna-public-index" || normalizeText(store.chainName).includes("superluna");
+}
+
+export async function exportCloudBackupSnapshot(db: SQLiteDatabase): Promise<CloudBackupSnapshot> {
+  let rawSnapshot: unknown;
+  await db.withExclusiveTransactionAsync(async (tx) => {
+    rawSnapshot = {
+      schemaVersion: 1,
+      createdAt: new Date().toISOString(),
+      tables: {
+        stores: await tx.getAllAsync("SELECT id, chain_id, chain_name, branch_name, address, city, state, latitude, longitude, source, source_url, address_verified, is_favorite, is_active, external_store_id, created_at FROM stores;"),
+        shopping_lists: await tx.getAllAsync("SELECT id, name, is_favorite, selected_store_id, created_at, updated_at FROM shopping_lists;"),
+        products: await tx.getAllAsync("SELECT id, name, brand, size_value, size_unit, category, product_key, is_favorite, created_at FROM products;"),
+        list_items: await tx.getAllAsync("SELECT id, list_id, product_id, quantity, created_at FROM list_items;"),
+        price_observations: await tx.getAllAsync("SELECT id, product_id, store_id, price_cents, currency, source, source_label, observed_at, availability FROM price_observations;"),
+        price_history: await tx.getAllAsync("SELECT id, product_id, store_id, old_price_cents, new_price_cents, source, source_label, changed_at FROM price_history;"),
+        alert_preferences: await tx.getAllAsync("SELECT alert_key, enabled, threshold_cents FROM alert_preferences;"),
+        alert_events: await tx.getAllAsync("SELECT id, product_id, store_id, message, old_price_cents, new_price_cents, created_at, is_read FROM alert_events;"),
+        app_settings: await tx.getAllAsync("SELECT setting_key, setting_value FROM app_settings WHERE setting_key = 'recommendation';"),
+      },
+    };
+  });
+  return parseCloudBackupSnapshot(rawSnapshot);
+}
+
+export async function restoreCloudBackupSnapshot(db: SQLiteDatabase, snapshotValue: unknown): Promise<void> {
+  const snapshot = parseCloudBackupSnapshot(snapshotValue);
+  const tables = snapshot.tables;
+  await db.withExclusiveTransactionAsync(async (tx) => {
+    await tx.execAsync(`
+      DELETE FROM alert_events;
+      DELETE FROM price_history;
+      DELETE FROM price_observations;
+      DELETE FROM list_items;
+      DELETE FROM products;
+      DELETE FROM shopping_lists;
+      DELETE FROM stores;
+      DELETE FROM alert_preferences;
+      DELETE FROM app_settings WHERE setting_key = 'recommendation';
+    `);
+
+    for (const row of tables.stores) {
+      await tx.runAsync(
+        `INSERT INTO stores (id, chain_id, chain_name, branch_name, address, city, state, latitude, longitude, source, source_url, address_verified, is_favorite, is_active, external_store_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        row.id, row.chain_id, row.chain_name, row.branch_name, row.address, row.city, row.state,
+        row.latitude, row.longitude, row.source, row.source_url, row.address_verified, row.is_favorite,
+        row.is_active, row.external_store_id, row.created_at,
+      );
+    }
+    for (const row of tables.products) {
+      await tx.runAsync(
+        `INSERT INTO products (id, name, brand, size_value, size_unit, category, product_key, is_favorite, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        row.id, row.name, row.brand, row.size_value, row.size_unit, row.category, row.product_key,
+        row.is_favorite, row.created_at,
+      );
+    }
+    for (const row of tables.shopping_lists) {
+      await tx.runAsync(
+        `INSERT INTO shopping_lists (id, name, is_favorite, selected_store_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?);`,
+        row.id, row.name, row.is_favorite, row.selected_store_id, row.created_at, row.updated_at,
+      );
+    }
+    for (const row of tables.list_items) {
+      await tx.runAsync(
+        "INSERT INTO list_items (id, list_id, product_id, quantity, created_at) VALUES (?, ?, ?, ?, ?);",
+        row.id, row.list_id, row.product_id, row.quantity, row.created_at,
+      );
+    }
+    for (const row of tables.price_observations) {
+      await tx.runAsync(
+        `INSERT INTO price_observations (id, product_id, store_id, price_cents, currency, source, source_label, observed_at, availability)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        row.id, row.product_id, row.store_id, row.price_cents, row.currency, row.source, row.source_label,
+        row.observed_at, row.availability,
+      );
+    }
+    for (const row of tables.price_history) {
+      await tx.runAsync(
+        `INSERT INTO price_history (id, product_id, store_id, old_price_cents, new_price_cents, source, source_label, changed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+        row.id, row.product_id, row.store_id, row.old_price_cents, row.new_price_cents, row.source,
+        row.source_label, row.changed_at,
+      );
+    }
+    for (const row of tables.alert_preferences) {
+      await tx.runAsync(
+        "INSERT INTO alert_preferences (alert_key, enabled, threshold_cents) VALUES (?, ?, ?);",
+        row.alert_key, row.enabled, row.threshold_cents,
+      );
+    }
+    for (const row of tables.alert_events) {
+      await tx.runAsync(
+        `INSERT INTO alert_events (id, product_id, store_id, message, old_price_cents, new_price_cents, created_at, is_read)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+        row.id, row.product_id, row.store_id, row.message, row.old_price_cents, row.new_price_cents,
+        row.created_at, row.is_read,
+      );
+    }
+    for (const row of tables.app_settings) {
+      await tx.runAsync(
+        "INSERT INTO app_settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value;",
+        row.setting_key, row.setting_value,
+      );
+    }
+  });
 }

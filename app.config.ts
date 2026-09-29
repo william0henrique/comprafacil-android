@@ -38,14 +38,17 @@ const env = {
 };
 
 // Only the API base is public. The Android app has no login/session configuration.
+const defaultPublicApiBaseUrl = "https://comprafacil-26jxnavu.manus.space";
 const publicRuntime = {
-  apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL ?? "",
+  apiBaseUrl: process.env.NODE_ENV === "production"
+    ? (process.env.EXPO_PUBLIC_PRODUCTION_API_BASE_URL || defaultPublicApiBaseUrl)
+    : (process.env.EXPO_PUBLIC_API_BASE_URL ?? ""),
 };
 
 const config: ExpoConfig = {
   name: env.appName,
   slug: env.appSlug,
-  version: "1.0.0",
+  version: "1.1.0",
   platforms: ["android"],
   extra: publicRuntime,
   orientation: "portrait",
@@ -68,7 +71,7 @@ const config: ExpoConfig = {
     },
     predictiveBackGestureEnabled: false,
     package: env.androidPackage,
-    versionCode: 1,
+    versionCode: 2,
     permissions: ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "POST_NOTIFICATIONS"],
     intentFilters: [
       {
@@ -95,6 +98,7 @@ const config: ExpoConfig = {
     "expo-sqlite",
     ["expo-location", { locationWhenInUsePermission: "Permita a localização para encontrar supermercados próximos quando você pedir." }],
     "expo-notifications",
+    ["expo-secure-store", { configureAndroidBackup: true }],
     [
       "expo-splash-screen",
       {
