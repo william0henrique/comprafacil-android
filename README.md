@@ -59,7 +59,7 @@ Cada novo preço manual pode registrar a alteração no histórico local. Notifi
 
 Listas, produtos, lojas, favoritos, preferências, preços e histórico permanecem no SQLite local. A API de backup está ativa no domínio de produção. O backup remoto é opcional, não cria conta e não sincroniza aparelhos; requer a versão do app cujo código inclui o cliente (1.1.0+) e consentimento explícito. Ainda não há APK 1.1.0 publicado.
 
-Quando a API estiver disponível, o fluxo será:
+O fluxo do cliente Android é:
 
 1. A pessoa autoriza o recurso nas Configurações.
 2. O Android gera uma chave de cifragem e um token de acesso aleatórios e independentes, guardados no SecureStore/Android Keystore.
