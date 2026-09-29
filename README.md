@@ -22,7 +22,7 @@ Quando uma Release verificada estiver disponível, baixe o APK anexado à Releas
 - Salva favoritos, preferências, histórico de alterações de preços e eventos localmente.
 - Pode solicitar localização em primeiro plano quando a pessoa inicia uma busca ou comparação; a localização é opcional.
 - Oferece notificações Android locais para eventos e limites associados a preços informados manualmente, quando a permissão é concedida.
-- Oferece backup remoto opcional, cifrado no próprio Android antes de ser enviado ao MySQL gerenciado.
+- Contém o fluxo de backup remoto opcional, cifrado no próprio Android; a API 1.1.0 ainda não foi publicada, portanto o backup remoto permanece indisponível nesta entrega.
 
 ## Lista, quantidade e totais
 
@@ -57,14 +57,16 @@ Cada novo preço manual pode registrar a alteração no histórico local. Notifi
 
 ## Dados e backup criptografado
 
-Sem ativar o backup, listas, produtos, lojas, favoritos, preferências, preços e histórico permanecem no SQLite local. O backup remoto é opcional e não cria conta nem sincroniza aparelhos:
+Listas, produtos, lojas, favoritos, preferências, preços e histórico permanecem no SQLite local. O código-fonte inclui um backup remoto opcional, sem conta nem sincronização entre aparelhos, mas a API correspondente à versão 1.1.0 ainda não está publicada no domínio de produção. **Não considere o backup remoto disponível até a publicação autorizada dessa API.**
+
+Quando a API estiver disponível, o fluxo será:
 
 1. A pessoa autoriza o recurso nas Configurações.
 2. O Android gera uma chave de cifragem e um token de acesso aleatórios e independentes, guardados no SecureStore/Android Keystore.
 3. O snapshot é cifrado no Android com XChaCha20-Poly1305 e enviado por HTTPS. O MySQL guarda somente o envelope cifrado, o hash do token, a revisão e horários; o backend não consegue ler o conteúdo.
 4. Depois de ativado, alterações são enviadas com o app em uso e há uma tentativa ao abrir. Não há execução agendada ou sincronização em segundo plano.
 
-**Limites importantes:** não há recuperação da chave, transferência para outro aparelho ou histórico de versões. Perder a chave de cifragem torna o conteúdo irrecuperável. Perder o token impede que o app localize ou apague aquela cópia. Não há expiração automática; apague a cópia remota nas Configurações antes de desinstalar o app. Pausar o backup mantém a cópia; apagar a cópia remota não remove os dados locais. Falhas de rede não impedem o uso local.
+**Limites importantes quando ativado:** não há recuperação da chave, transferência para outro aparelho ou histórico de versões. Perder a chave de cifragem torna o conteúdo irrecuperável. Perder o token impede que o app localize ou apague aquela cópia. Não há expiração automática; apague a cópia remota nas Configurações antes de desinstalar o app. Pausar o backup mantém a cópia; apagar a cópia remota não remove os dados locais. Falhas de rede não impedem o uso local.
 
 Veja o [contrato de segurança do backup](docs/cloud-backup-security.md) para dados visíveis ao serviço, tamanho máximo, limites básicos de requisição e detalhes técnicos.
 

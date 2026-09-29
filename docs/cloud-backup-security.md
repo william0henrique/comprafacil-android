@@ -1,5 +1,9 @@
 # Backup criptografado do CompraFácil
 
+## Estado atual de publicação
+
+O código da API e a migração estão no projeto, mas a revisão 1.1.0 do backend ainda não foi publicada no domínio de produção; por isso, o endpoint não está disponível e o backup remoto não pode ser usado nesta entrega. As seções seguintes descrevem o contrato da implementação. A rota é anônima e tem limites de requisição em memória por processo, mas não possui quota global durável de armazenamento; antes de ativá-la para distribuição pública, é necessário definir uma política de quota e monitoramento.
+
 ## Decisão de segurança
 
 O SQLite no Android continua sendo a fonte principal. O backup remoto é opcional e só começa após consentimento explícito nas Configurações. O app cria um snapshot JSON versionado no aparelho, cifra-o com **XChaCha20-Poly1305** e envia por HTTPS apenas um envelope com versão, algoritmo, nonce e texto cifrado. O backend não recebe listas, produtos, lojas, endereços/coordenadas salvos, preços, histórico, favoritos ou preferências em texto legível.
